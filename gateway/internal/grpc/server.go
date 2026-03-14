@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	pb "safe_terminal/gateway/gen/pb"
 	"safe_terminal/gateway/config"
 	kafkaclient "safe_terminal/gateway/internal/kafka"
@@ -15,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -181,19 +184,93 @@ func (s *GatewayServer) handleReport(ctx context.Context, terminalID string, rep
 	}
 }
 
-// authenticate 从 metadata 验证终端身份
-// 生产中应结合 mTLS 证书 CN 字段进行验证
+// authenticate 验证探针身份，三段优先级：
+//  1. mTLS 证书 CN（TLS.Enabled=true 且探针携带客户端证书）
+//  2. JWT Bearer Token（JWT.Enabled=true，Header: authorization: Bearer <token>）
+//  3. x-terminal-id 明文 Header（开发/测试模式回退）
 func (s *GatewayServer) authenticate(ctx context.Context) (string, error) {
+	// ── 优先级 1: mTLS 证书 CN ────────────────────────────────────────────────
+	if s.cfg.TLS.Enabled {
+		if p, ok := peer.FromContext(ctx); ok {
+			if tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo); ok {
+				if len(tlsInfo.State.PeerCertificates) > 0 {
+					cn := tlsInfo.State.PeerCertificates[0].Subject.CommonName
+					if cn != "" {
+						s.log.Debug("authenticated via mTLS cert CN", zap.String("terminal_id", cn))
+						return cn, nil
+					}
+				}
+			}
+		}
+	}
+
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", fmt.Errorf("missing metadata")
+		return "", fmt.Errorf("missing gRPC metadata")
 	}
+
+	// ── 优先级 2: JWT Bearer Token ────────────────────────────────────────────
+	if s.cfg.JWT.Enabled {
+		authValues := md.Get("authorization")
+		if len(authValues) > 0 {
+			raw := authValues[0]
+			tokenStr := strings.TrimPrefix(raw, "Bearer ")
+			if tokenStr == raw {
+				// 格式不对，不是 Bearer 方案
+				return "", fmt.Errorf("authorization header must use Bearer scheme")
+			}
+			terminalID, err := s.verifyJWT(tokenStr)
+			if err != nil {
+				return "", fmt.Errorf("JWT verification failed: %w", err)
+			}
+			s.log.Debug("authenticated via JWT", zap.String("terminal_id", terminalID))
+			return terminalID, nil
+		}
+		// JWT 模式下必须携带 token
+		return "", fmt.Errorf("JWT enabled but no authorization header provided")
+	}
+
+	// ── 优先级 3: x-terminal-id（开发模式回退）────────────────────────────────
 	ids := md.Get("x-terminal-id")
 	if len(ids) == 0 || ids[0] == "" {
-		return "", fmt.Errorf("missing x-terminal-id header")
+		return "", fmt.Errorf("missing x-terminal-id header (dev mode)")
 	}
-	// TODO: 验证 token 签名或与 MySQL 终端表校验
+	s.log.Debug("authenticated via x-terminal-id (dev mode)", zap.String("terminal_id", ids[0]))
 	return ids[0], nil
+}
+
+// verifyJWT 验证 HMAC-SHA256 签名的终端 JWT，提取 terminal_id claim。
+// 探针在向 Java 后端注册后，后端颁发包含 terminal_id 字段的 token。
+func (s *GatewayServer) verifyJWT(tokenStr string) (string, error) {
+	secret, err := base64.StdEncoding.DecodeString(s.cfg.JWT.Secret)
+	if err != nil {
+		return "", fmt.Errorf("decode JWT secret: %w", err)
+	}
+
+	token, err := jwtv5.Parse(tokenStr, func(t *jwtv5.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwtv5.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return secret, nil
+	}, jwtv5.WithExpirationRequired())
+
+	if err != nil {
+		return "", err
+	}
+
+	claims, ok := token.Claims.(jwtv5.MapClaims)
+	if !ok || !token.Valid {
+		return "", fmt.Errorf("invalid token claims")
+	}
+
+	// 优先使用 terminal_id claim，回退到 sub claim
+	if tid, ok := claims["terminal_id"].(string); ok && tid != "" {
+		return tid, nil
+	}
+	if sub, ok := claims["sub"].(string); ok && sub != "" {
+		return sub, nil
+	}
+	return "", fmt.Errorf("token missing terminal_id or sub claim")
 }
 
 // StartPolicySubscriber 监听 Redis 策略变更并广播给所有连接的探针

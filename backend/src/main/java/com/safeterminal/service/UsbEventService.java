@@ -9,12 +9,20 @@ import com.safeterminal.proto.TerminalProto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.SearchHitSupport;
+import org.springframework.data.elasticsearch.core.mapping.IndexCoordinates;
+import org.springframework.data.elasticsearch.core.query.Criteria;
+import org.springframework.data.elasticsearch.core.query.CriteriaQuery;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
 import java.util.UUID;
 
 @Slf4j
@@ -40,6 +48,42 @@ public class UsbEventService {
             esOperations.save(doc, org.springframework.data.elasticsearch.core.mapping.IndexCoordinates.of(indexName));
         } catch (Exception e) {
             log.error("Failed to index USB event to ES", e);
+        }
+    }
+
+    /**
+     * USB 事件检索（跨天索引通配查询，支持设备 ID 过滤、时间范围和分页）
+     */
+    public Page<UsbEventDocument> search(String terminalId, String deviceId,
+                                          String startDate, String endDate,
+                                          Pageable pageable) {
+        Criteria criteria = new Criteria();
+
+        if (terminalId != null && !terminalId.isBlank()) {
+            criteria = criteria.and("terminalId").is(terminalId);
+        }
+        if (deviceId != null && !deviceId.isBlank()) {
+            criteria = criteria.and("deviceId").is(deviceId);
+        }
+        if (startDate != null && !startDate.isBlank() && endDate != null && !endDate.isBlank()) {
+            Instant from = Instant.parse(startDate + "T00:00:00.000Z");
+            Instant to   = Instant.parse(endDate   + "T23:59:59.999Z");
+            criteria = criteria.and("timestamp").between(from, to);
+        }
+
+        CriteriaQuery query = new CriteriaQuery(criteria, pageable);
+
+        try {
+            var searchPage = esOperations.searchForPage(
+                query, UsbEventDocument.class,
+                IndexCoordinates.of(usbIndexPrefix + "*"));
+
+            @SuppressWarnings("unchecked")
+            Page<UsbEventDocument> result = (Page<UsbEventDocument>) SearchHitSupport.unwrapSearchHits(searchPage);
+            return result;
+        } catch (Exception e) {
+            log.error("USB ES search failed", e);
+            return new PageImpl<>(Collections.emptyList(), pageable, 0);
         }
     }
 

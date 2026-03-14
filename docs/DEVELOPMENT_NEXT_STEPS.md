@@ -113,6 +113,78 @@
 
 ---
 
+## ✅ P2 已完成（2026-03-14）
+
+以下三项 P2 任务已全部实现，系统安全认证链路打通，ES 检索能力完善，仪表盘数据真实化。
+
+### ✅ P2.1 — Go 网关 Token 身份验证
+
+**涉及文件：** `gateway/internal/grpc/server.go`、`gateway/config/config.go`、`gateway/config/config.toml`、`gateway/go.mod`
+
+**实现内容：**
+
+`authenticate()` 方法改为**三段优先级**验证：
+
+| 优先级 | 方式 | 启用条件 | 说明 |
+|--------|------|----------|------|
+| 1 | mTLS 证书 CN | `tls.enabled = true` 且探针携带客户端证书 | 提取 `PeerCertificates[0].Subject.CommonName` 作为 `terminal_id` |
+| 2 | JWT Bearer Token | `jwt.enabled = true` | 校验 HMAC-SHA256 签名（`golang-jwt/jwt/v5`），提取 `terminal_id` 或 `sub` claim；密钥与 Java 后端共享（Base64 编码 HMAC 密钥）|
+| 3 | `x-terminal-id` Header | 两者均为 `false`（开发模式） | 直接信任 Header 中的 ID，无需任何证书/Token |
+
+- `config.go` 新增 `JWTConfig { Enabled bool; Secret string }`，挂入 `Config.JWT`
+- `config.toml` 新增 `[jwt]` 块，`enabled = false`，`secret` 与 `application.yml jwt.secret` 保持一致
+- `go.mod` 新增 `github.com/golang-jwt/jwt/v5 v5.2.1` 依赖
+- 新增私有方法 `verifyJWT(tokenStr string) (string, error)`：解析 Token、验证签名方法必须为 HMAC、强制校验过期时间
+
+---
+
+### ✅ P2.2 — ES 时间范围检索 + 分页
+
+**涉及文件：** `backend/.../service/LogIndexService.java`、`UsbEventService.java`、`controller/EventSearchController.java`
+
+**实现内容：**
+
+`LogIndexService.search()` 重写：
+- 使用通配符索引 `logs-*` 跨天查询，不再局限于当天
+- 新增 `Pageable` 参数，默认按 `timestamp` 降序排列
+- 新增时间范围过滤：`timestamp.between(startDate T00:00:00Z, endDate T23:59:59Z)`
+- 返回类型改为 `Page<LogDocument>`，前端可直接获取 `totalElements`、`totalPages`
+
+`UsbEventService` 新增 `search()` 方法：
+- 同样使用 `usb-events-*` 通配符索引
+- 支持 `terminalId`、`deviceId`（如 `VID_0951&PID_1666`）、时间范围、分页
+
+`EventSearchController` 更新：
+- `GET /v1/events/logs` 新增 `page`、`size` 参数，返回 `Page<LogDocument>`，`size` 上限 200
+- 新增 `GET /v1/events/usb` 端点（USB 事件检索），支持同等分页/过滤参数
+
+---
+
+### ✅ P2.3 — 仪表盘图表接入真实数据
+
+**涉及文件：** `backend/.../service/StatsService.java`（新建）、`controller/StatsController.java`（新建）、`frontend/src/api/stats.ts`（新建）、`DashboardView.vue`
+
+**实现内容：**
+
+新建 `StatsService`：
+- `getEventTrend(days)` — 按天查询 ES 中 `logs-*` 和 `usb-events-*` 索引的文档数；告警数通过 `AlertRepository.countByCreatedAtAfter()` 差值计算；返回 `List<DailyEventStat(date, logCount, usbCount, alertCount)>`
+- `getAlertDistribution()` — JPQL `GROUP BY alertType` 返回每类告警计数，格式直接适配 ECharts pie data `[{name, value}]`
+
+新建 `StatsController`（`/v1/stats/`）：
+- `GET /v1/stats/event-trend?days=7` — 近 N 天事件趋势（1~30，默认 7）
+- `GET /v1/stats/alert-distribution` — 告警类型分布
+
+`AlertRepository` 新增 `countByAlertType()` JPQL 查询。
+
+前端 `stats.ts` 定义 `DailyEventStat` 和 `AlertTypeStat` 接口，封装两个 API 调用。
+
+`DashboardView.vue` 重构：
+- `onMounted` 中并行调用 4 个 API（`onlineCount`、`terminalList`、`eventTrend`、`alertDistribution`）
+- ECharts 图表由 `buildTrendOption()` / `buildDistOption()` 动态生成，数据驱动
+- 删除全部硬编码模拟数据
+
+---
+
 ---
 
 ## 目录
@@ -137,10 +209,9 @@
 | ~~P1~~ | ✅ 已完成 | ~~C++ Linux 日志采集（journald）~~ | C++ 探针 | 1 天 |
 | ~~P1~~ | ✅ 已完成 | ~~C++ Windows 日志采集（EvtSubscribe）~~ | C++ 探针 | 1.5 天 |
 | ~~P1~~ | ✅ 已完成 | ~~C++ 磁盘 WAL 环形缓冲区~~ | C++ 探针 | 1 天 |
-| P2 | 待开发 | Go 网关 Token 身份验证 | Go 网关 | 0.5 天 |
-| P2 | 待开发 | ES 时间范围检索 + 分页 | Java 后端 | 0.5 天 |
-| P2 | 待开发 | 仪表盘图表接入真实数据 | Vue 前端 | 1 天 |
-| P3 | 待开发 | USB 事件 ES 检索接口 | Java 后端 | 0.5 天 |
+| ~~P2~~ | ✅ 已完成 | ~~Go 网关 Token 身份验证~~ | Go 网关 | 0.5 天 |
+| ~~P2~~ | ✅ 已完成 | ~~ES 时间范围检索 + 分页~~ | Java 后端 | 0.5 天 |
+| ~~P2~~ | ✅ 已完成 | ~~仪表盘图表接入真实数据~~ | Vue 前端 | 1 天 |
 | P3 | 待开发 | 前端登录 + Token 持久化 | Vue 前端 | 0.5 天 |
 
 ---
@@ -432,29 +503,32 @@ public List<UsbEventDocument> searchUsb(
 
 | 文件 | 位置 | TODO 内容 |
 |------|------|-----------|
-| `grpc/server.go` | `authenticate()` | JWT 签名验证 |
-| `grpc/server.go` | `BuildTLSCredentials()` | 加载 mTLS 证书（已提供实现） |
+| ✅ `grpc/server.go` | `authenticate()` | JWT 三段优先级验证（mTLS CN → JWT → x-terminal-id）|
+| ✅ `grpc/server.go` | `BuildTLSCredentials()` | 加载 mTLS 证书（已完成） |
 
 ### Java 后端
 
 | 文件 | 位置 | TODO 内容 |
 |------|------|-----------|
-| `LogIndexService.java` | `search()` | 时间范围过滤 + 分页 |
-| `EventSearchController.java` | 末尾注释 | `/v1/events/usb` 接口 |
-| `PolicyService.java` | `getPolicyForTerminal()` | 查询终端绑定策略 |
-| 缺失文件 | — | Spring Security JWT（`security/` 包） |
-| 缺失文件 | — | `EsIndexNameResolver` Bean |
-| 缺失文件 | — | `InfluxDB` 时序查询接口 |
+| ✅ `LogIndexService.java` | `search()` | 时间范围过滤 + 分页（已完成，通配符索引 `logs-*`）|
+| ✅ `EventSearchController.java` | 末尾注释 | `/v1/events/usb` 接口（已完成）|
+| ✅ `StatsService.java` | — | 新建，事件趋势 + 告警分布统计（已完成）|
+| ✅ `StatsController.java` | — | 新建，`/v1/stats/*` 接口（已完成）|
+| ⬜ `PolicyService.java` | `getPolicyForTerminal()` | 查询终端绑定策略 |
+| ✅ 缺失文件 | — | Spring Security JWT（`security/` 包，已完成）|
+| ✅ 缺失文件 | — | `EsIndexNameResolver` Bean（已完成）|
+| ⬜ 缺失文件 | — | `InfluxDB` 时序查询接口 |
 
 ### Vue 前端
 
 | 文件 | 位置 | TODO 内容 |
 |------|------|-----------|
-| `DashboardView.vue` | 图表数据 | 接入真实统计 API |
-| `TerminalListView.vue` | `onlineMap` | 批量查询在线状态填充 |
-| `LoginView.vue` | `login()` | 登录成功后解析 token 存 Store |
-| 缺失文件 | — | `userStore.ts`（角色权限） |
-| 缺失文件 | — | `EventSearchView` USB 事件 Tab |
+| ✅ `DashboardView.vue` | 图表数据 | 接入真实统计 API（已完成，调用 `/v1/stats/*`）|
+| ✅ `stats.ts` | — | 新建，封装 `statsApi.eventTrend` / `alertDistribution`（已完成）|
+| ⬜ `TerminalListView.vue` | `onlineMap` | 批量查询在线状态填充 |
+| ⬜ `LoginView.vue` | `login()` | 登录成功后解析 token 存 Store |
+| ⬜ 缺失文件 | — | `userStore.ts`（角色权限）|
+| ⬜ 缺失文件 | — | `EventSearchView` USB 事件 Tab |
 
 ---
 

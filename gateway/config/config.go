@@ -12,6 +12,7 @@ type Config struct {
 	Kafka   KafkaConfig   `mapstructure:"kafka"`
 	Redis   RedisConfig   `mapstructure:"redis"`
 	TLS     TLSConfig     `mapstructure:"tls"`
+	JWT     JWTConfig     `mapstructure:"jwt"`
 	Metrics MetricsConfig `mapstructure:"metrics"`
 }
 
@@ -46,6 +47,15 @@ type TLSConfig struct {
 	CertFile string `mapstructure:"cert_file"`
 	KeyFile  string `mapstructure:"key_file"`
 	CAFile   string `mapstructure:"ca_file"`
+}
+
+// JWTConfig 控制网关对探针 JWT Token 的校验行为
+type JWTConfig struct {
+	// Enabled 为 true 时网关强制验证 JWT；false 时仅校验 x-terminal-id（开发模式）
+	Enabled bool `mapstructure:"enabled"`
+	// Secret 与 Java 后端共享的 HMAC-SHA256 密钥（Base64 编码），
+	// 与 application.yml jwt.secret 保持一致
+	Secret string `mapstructure:"secret"`
 }
 
 type MetricsConfig struct {

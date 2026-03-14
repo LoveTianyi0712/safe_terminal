@@ -20,6 +20,10 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
 
     long countByCreatedAtAfter(LocalDateTime after);
 
+    /** 按告警类型分组计数，用于仪表盘饼图 */
+    @Query("SELECT a.alertType, COUNT(a) FROM Alert a GROUP BY a.alertType ORDER BY COUNT(a) DESC")
+    List<Object[]> countByAlertType();
+
     /** 查询1小时内同一终端的 USB CONNECTED 事件数量 */
     @Query("""
         SELECT COUNT(a) FROM Alert a

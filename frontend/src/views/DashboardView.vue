@@ -64,61 +64,71 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import { useAlertStore } from '@/stores/alertStore'
 import { terminalApi } from '@/api/terminal'
+import { statsApi, type DailyEventStat, type AlertTypeStat } from '@/api/stats'
 
 use([LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
-const alertStore  = useAlertStore()
+const alertStore     = useAlertStore()
 const totalTerminals = ref(0)
 const onlineCount    = ref(0)
 
 const statCards = computed(() => [
-  { label: '总终端数', value: totalTerminals.value, icon: 'Monitor',      color: '#409EFF' },
-  { label: '在线终端', value: onlineCount.value,    icon: 'CircleCheck',  color: '#67C23A' },
-  { label: '今日告警', value: alertStore.todayCount, icon: 'Warning',     color: '#E6A23C' },
-  { label: '未处理告警', value: alertStore.openCount, icon: 'DataLine',   color: '#F56C6C' },
+  { label: '总终端数',   value: totalTerminals.value,   icon: 'Monitor',     color: '#409EFF' },
+  { label: '在线终端',   value: onlineCount.value,      icon: 'CircleCheck', color: '#67C23A' },
+  { label: '今日告警',   value: alertStore.todayCount,  icon: 'Warning',     color: '#E6A23C' },
+  { label: '未处理告警', value: alertStore.openCount,   icon: 'DataLine',    color: '#F56C6C' },
 ])
 
-// 近7日事件趋势（模拟数据，实际应调用 API）
-const eventTrendOption = ref({
-  tooltip: { trigger: 'axis' },
-  legend: { data: ['日志事件', 'USB事件', '告警'] },
-  xAxis: { type: 'category', data: ['3/8','3/9','3/10','3/11','3/12','3/13','3/14'] },
-  yAxis: { type: 'value' },
-  series: [
-    { name: '日志事件', type: 'line', smooth: true, data: [1200,980,1100,1400,1050,1300,1180] },
-    { name: 'USB事件', type: 'line', smooth: true, data: [45,32,58,71,43,62,55] },
-    { name: '告警',    type: 'line', smooth: true, data: [8,5,12,15,6,10,9] },
-  ],
-})
+// ── 近7日事件趋势（真实数据）──────────────────────────────────────────────
+const eventTrendOption = ref<object>({})
 
-const alertDistOption = ref({
-  tooltip: { trigger: 'item' },
-  legend: { bottom: 0 },
-  series: [{
-    name: '告警类型',
-    type: 'pie',
-    radius: ['40%', '70%'],
-    data: [
-      { value: 48, name: 'USB滥用' },
-      { value: 23, name: '黑名单设备' },
-      { value: 15, name: '异常登录' },
-      { value: 14, name: '其他' },
+function buildTrendOption(stats: DailyEventStat[]) {
+  return {
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['日志事件', 'USB事件', '告警'] },
+    xAxis: { type: 'category', data: stats.map(s => s.date) },
+    yAxis: { type: 'value' },
+    series: [
+      { name: '日志事件', type: 'line', smooth: true, data: stats.map(s => s.logCount) },
+      { name: 'USB事件',  type: 'line', smooth: true, data: stats.map(s => s.usbCount) },
+      { name: '告警',     type: 'line', smooth: true, data: stats.map(s => s.alertCount) },
     ],
-  }],
-})
+  }
+}
 
-function severityTag(s: number) { return ['info','warning','danger','danger'][s] ?? 'info' }
-function severityLabel(s: number) { return ['信息','警告','错误','严重'][s] ?? '未知' }
-function statusTag(s: number)   { return ['danger','warning','success'][s] ?? 'info' }
-function statusLabel(s: number) { return ['未处理','已确认','已解决'][s] ?? '未知' }
+// ── 告警类型分布（真实数据）─────────────────────────────────────────────
+const alertDistOption = ref<object>({})
+
+function buildDistOption(stats: AlertTypeStat[]) {
+  return {
+    tooltip: { trigger: 'item' },
+    legend: { bottom: 0 },
+    series: [{
+      name: '告警类型',
+      type: 'pie',
+      radius: ['40%', '70%'],
+      data: stats,
+    }],
+  }
+}
+
+// ── 辅助函数 ──────────────────────────────────────────────────────────────
+function severityTag(s: number)  { return (['info','warning','danger','danger'] as const)[s] ?? 'info' }
+function severityLabel(s: number){ return ['信息','警告','错误','严重'][s] ?? '未知' }
+function statusTag(s: number)    { return (['danger','warning','success'] as const)[s] ?? 'info' }
+function statusLabel(s: number)  { return ['未处理','已确认','已解决'][s] ?? '未知' }
 
 onMounted(async () => {
-  const [onlineCnt, pageData] = await Promise.all([
+  const [onlineCnt, pageData, trendData, distData] = await Promise.all([
     terminalApi.onlineCount(),
     terminalApi.list({ size: 1 }),
+    statsApi.eventTrend(7),
+    statsApi.alertDistribution(),
   ])
   onlineCount.value    = onlineCnt.count
   totalTerminals.value = (pageData as any).totalElements ?? 0
+  eventTrendOption.value = buildTrendOption(trendData as DailyEventStat[])
+  alertDistOption.value  = buildDistOption(distData as AlertTypeStat[])
   alertStore.fetchStats()
   alertStore.loadAlerts({ status: 0 })
 })

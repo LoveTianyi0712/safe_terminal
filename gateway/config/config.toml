@@ -27,5 +27,11 @@ cert_file = "/etc/safe_terminal/certs/server.crt"
 key_file  = "/etc/safe_terminal/certs/server.key"
 ca_file   = "/etc/safe_terminal/certs/ca.crt"
 
+[jwt]
+# 开发环境设为 false，探针只需传 x-terminal-id header；
+# 生产环境设为 true 并与 Java application.yml jwt.secret 保持一致
+enabled = false
+secret  = "c2FmZS10ZXJtaW5hbC1qd3Qtc2VjcmV0LWtleS0yMDI1IQ=="
+
 [metrics]
 addr = ":9090"
