@@ -60,6 +60,59 @@
 
 ---
 
+## ✅ P1 已完成（2025-03-14）
+
+以下四项 P1 任务已全部实现，C++ 探针现可在 Linux 上真实采集系统日志和 USB 事件，并具备断网缓存能力。
+
+### ✅ P1.1 — Linux journald 日志采集
+
+**涉及文件：** `client/src/probe/SystemLogCollector.h/.cpp`
+
+**实现内容：**
+- `SystemLogCollector` 构造函数新增 `PolicyManager* policy_mgr = nullptr` 参数，用于过滤低于策略设定级别的日志
+- `init_linux_journald()`：调用 `sd_journal_open(SD_JOURNAL_LOCAL_ONLY)` 打开本机日志，`sd_journal_seek_tail()` + `sd_journal_previous()` 定位到最新位置，**不重放历史日志**
+- `poll_journald()`：`sd_journal_wait(200ms)` 阻塞等待新条目 → `sd_journal_next()` 逐条读取 → 提取 `MESSAGE`、`PRIORITY`、`SYSLOG_IDENTIFIER` 三个字段 → 映射 syslog 优先级到 `Severity`（0-2=CRITICAL, 3=ERROR, 4=WARNING, 5-6=INFO, 7=DEBUG 跳过）→ 按策略过滤 → 触发 `callback_`
+- 头文件新增 `sd_journal* journal_{nullptr}` 平台成员变量
+
+### ✅ P1.2 — Linux USB 监控（libudev）
+
+**涉及文件：** `client/src/probe/UsbMonitor.h/.cpp`
+
+**实现内容：**
+- `init_udev()`：`udev_new()` → `udev_monitor_new_from_netlink("udev")` → `filter_add_match_subsystem_devtype("usb", "usb_device")` → `enable_receiving()`，错误时记录日志并安全退出
+- `poll_udev()`：`poll(fd, 200ms)` → `udev_monitor_receive_device()` → 提取 `idVendor`、`idProduct`（组合为 `VID_xxxx&PID_xxxx`）、`serial`、`manufacturer`、`product` → 构造 `UsbEvent` → `udev_device_unref()`
+- `cleanup_udev()`：`monitor_loop()` 退出后自动释放 `udev_monitor` 和 `udev` 上下文，防止资源泄漏
+- 头文件新增 `cleanup_udev()` 私有方法声明
+
+### ✅ P1.3 — Windows EvtSubscribe 日志采集
+
+**涉及文件：** `client/src/probe/SystemLogCollector.h/.cpp`
+
+**实现内容：**
+- `init_windows()`：调用 `EvtSubscribe(L"Security", XPath, EvtSubscribeToFutureEvents, callback)` 订阅安全频道（覆盖登录成功/失败 4624/4625、显式凭据 4648、进程创建 4688 等高价值事件）
+- `win_event_callback()`（静态成员函数）：`EvtRender(EvtRenderEventXml)` 获取 XML → `WideCharToMultiByte` 转 UTF-8 → 字符串提取 `EventID`、`Level`、`Channel`、`Data` 字段 → 映射 Windows 级别（1=CRITICAL, 2=ERROR, 3=WARNING, 4=INFO）→ 按策略过滤 → 触发 `callback_`
+- `poll_windows_event_log()`：EvtSubscribe 为异步推送模式，此函数仅 `sleep(200ms)` 保持线程存活
+- 头文件新增 `EVT_HANDLE subscription_{nullptr}` 和静态回调声明
+
+### ✅ P1.4 — 磁盘 WAL 环形缓冲区
+
+**涉及文件：** `client/src/transport/RingBuffer.cpp`
+
+**WAL 二进制格式（每条记录）：**
+```
+[total_len: 4B][topic_len: 4B][topic: N B][data_len: 4B][data: M B][sequence: 8B]
+```
+
+**实现内容：**
+- `write_to_wal()`：追加写入 WAL 文件（`std::ios::app`）；写入前检查文件大小，超过 `disk_max_mb_` 上限则丢弃，防止磁盘打满
+- `flush_to_disk()`：持有锁后将 `mem_queue_` 中**所有未确认条目**批量追加写入 WAL；程序关机时自动调用（析构函数）
+- `recover_from_disk()`：启动时顺序读取 WAL 文件 → 解析每条记录压入 `mem_queue_` → 更新 `next_seq_` 避免序号冲突 → 恢复完成后将 WAL 重命名为 `.bak`（保留备份）；文件损坏（字段长度越界）时安全截断，不崩溃
+
+**其他改动：**
+- `main.cpp`：`SystemLogCollector` 构造时传入 `&policy_mgr`；`build_identity()` 调用 `get_hostname()` / `get_primary_ip()` / `get_os_version()` 填充真实主机信息（跨平台实现）
+
+---
+
 ---
 
 ## 目录
@@ -80,10 +133,10 @@
 | ~~P0~~ | ✅ 已完成 | ~~Spring Security JWT 登录接口~~ | Java 后端 | 0.5 天 |
 | ~~P0~~ | ✅ 已完成 | ~~ES 动态索引名 Bean~~ | Java 后端 | 0.5 天 |
 | ~~P0~~ | ✅ 已完成 | ~~Go 网关 TLS 证书加载~~ | Go 网关 | 0.5 天 |
-| P1 | 待开发 | C++ Linux USB 监控（libudev） | C++ 探针 | 1 天 |
-| P1 | 待开发 | C++ Linux 日志采集（journald） | C++ 探针 | 1 天 |
-| P1 | 待开发 | C++ Windows 日志采集（EvtSubscribe） | C++ 探针 | 1.5 天 |
-| P1 | 待开发 | C++ 磁盘 WAL 环形缓冲区 | C++ 探针 | 1 天 |
+| ~~P1~~ | ✅ 已完成 | ~~C++ Linux USB 监控（libudev）~~ | C++ 探针 | 1 天 |
+| ~~P1~~ | ✅ 已完成 | ~~C++ Linux 日志采集（journald）~~ | C++ 探针 | 1 天 |
+| ~~P1~~ | ✅ 已完成 | ~~C++ Windows 日志采集（EvtSubscribe）~~ | C++ 探针 | 1.5 天 |
+| ~~P1~~ | ✅ 已完成 | ~~C++ 磁盘 WAL 环形缓冲区~~ | C++ 探针 | 1 天 |
 | P2 | 待开发 | Go 网关 Token 身份验证 | Go 网关 | 0.5 天 |
 | P2 | 待开发 | ES 时间范围检索 + 分页 | Java 后端 | 0.5 天 |
 | P2 | 待开发 | 仪表盘图表接入真实数据 | Vue 前端 | 1 天 |
@@ -92,339 +145,122 @@
 
 ---
 
-## 阶段一：打通主干链路
+## ✅ 阶段一：打通主干链路（已完成）
 
-> 目标：让前端能正常打开、登录，后端能接收 Kafka 消息并写入 ES
-
-### 1.1 Java 后端 — Spring Security JWT 登录
-
-**文件**：需新建 `backend/src/main/java/com/safeterminal/security/` 包
-
-**需要创建的类：**
-
-```
-security/
-├── JwtTokenProvider.java     # JWT 生成/解析/验证
-├── JwtAuthFilter.java        # OncePerRequestFilter，从 Header 提取 Token
-├── SecurityConfig.java       # WebSecurityConfigurerAdapter，配置白名单/CORS
-└── AuthController.java       # POST /auth/login，返回 { token, expireAt, role }
-```
-
-**`AuthController.java` 核心逻辑：**
-
-```java
-@PostMapping("/auth/login")
-public ResponseEntity<?> login(@RequestBody LoginRequest req) {
-    // 1. 从 sys_user 表查用户
-    // 2. BCryptPasswordEncoder 对比密码
-    // 3. 生成 JWT（payload: username, role, exp）
-    // 4. 返回 { "token": "eyJ...", "expireAt": "..." }
-}
-```
-
-**推荐依赖（加入 pom.xml）：**
-
-```xml
-<dependency>
-    <groupId>io.jsonwebtoken</groupId>
-    <artifactId>jjwt-api</artifactId>
-    <version>0.12.5</version>
-</dependency>
-<dependency>
-    <groupId>io.jsonwebtoken</groupId>
-    <artifactId>jjwt-impl</artifactId>
-    <version>0.12.5</version>
-    <scope>runtime</scope>
-</dependency>
-```
-
-**前端对接**：`frontend/src/views/LoginView.vue` 的 `login()` 方法已预留接口调用，后端接口上线后直接可用。
+> **完成时间**：2025-03-14  
+> **目标达成**：前端可正常登录并获取 JWT，后端可启动并写入 ES，网关支持开发/生产双模式。
 
 ---
 
-### 1.2 Java 后端 — ES 动态索引名 Bean
+### ✅ 1.1 Java 后端 — Spring Security JWT 登录（已完成）
 
-**文件**：新建 `backend/src/main/java/com/safeterminal/config/EsIndexNameResolver.java`
+**实现文件：** `backend/src/main/java/com/safeterminal/security/`
 
-```java
-@Component("indexNameResolver")
-public class EsIndexNameResolver {
-    @Value("${safe-terminal.es.index.log-prefix:logs-}")
-    private String logPrefix;
+| 文件 | 实现说明 |
+|------|---------|
+| `JwtTokenProvider.java` | JJWT 0.12.6 生成/解析/校验；Access Token（24h）+ Refresh Token（7d）；Payload 含 `sub`、`role`、`iat`、`exp` |
+| `JwtAuthFilter.java` | `OncePerRequestFilter`；从 `Authorization: Bearer <token>` 提取并校验 Token；写入 `SecurityContextHolder` |
+| `SecurityConfig.java` | 无状态 Session；公开路径白名单（`/auth/**`、`/ws/**`、`/actuator/health`）；CORS 允许 localhost:3000；401/403 返回 JSON |
+| `UserDetailsServiceImpl.java` | 从 `sys_user` 表加载用户；角色加 `ROLE_` 前缀 |
+| `JwtProperties.java` | 绑定 `application.yml` `jwt.*` 配置项 |
+| `AuthController.java` | `POST /auth/login` → `{token, refreshToken, expiresAt, username, role}`；`POST /auth/refresh` 换新 Token；`GET /auth/me` 返回当前用户 |
 
-    @Value("${safe-terminal.es.index.usb-prefix:usb-events-}")
-    private String usbPrefix;
-
-    public String resolveLogIndex() {
-        return logPrefix + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy.MM.dd"));
-    }
-
-    public String resolveUsbIndex() {
-        return usbPrefix + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy.MM.dd"));
-    }
-}
-```
-
-`LogDocument` 和 `UsbEventDocument` 中的 `@Document(indexName = "#{@indexNameResolver.resolveLogIndex()}")` 依赖此 Bean，不创建则后端启动报错。
+`pom.xml` 已包含 `jjwt-api / jjwt-impl / jjwt-jackson 0.12.6`；`application.yml` 中 `jwt.secret` 已配置（**生产环境须替换**）。
 
 ---
 
-### 1.3 Go 网关 — TLS 证书加载
+### ✅ 1.2 Java 后端 — ES 动态索引名 Bean（已完成）
 
-**文件**：`gateway/internal/grpc/server.go`，找到 `BuildTLSCredentials` 函数：
+**实现文件：** `backend/src/main/java/com/safeterminal/config/EsIndexNameResolver.java`
 
-```go
-func BuildTLSCredentials(cfg config.TLSConfig) (credentials.TransportCredentials, error) {
-    // 替换此函数体：
-    cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
-    if err != nil {
-        return nil, fmt.Errorf("load server cert: %w", err)
-    }
-
-    caPool := x509.NewCertPool()
-    caData, err := os.ReadFile(cfg.CAFile)
-    if err != nil {
-        return nil, fmt.Errorf("read CA cert: %w", err)
-    }
-    caPool.AppendCertsFromPEM(caData)
-
-    tlsCfg := &tls.Config{
-        Certificates: []tls.Certificate{cert},
-        ClientCAs:    caPool,
-        ClientAuth:   tls.RequireAndVerifyClientCert, // mTLS
-    }
-    return credentials.NewTLS(tlsCfg), nil
-}
-```
-
-**`main.go` 中取消注释（约第 60 行）：**
-
-```go
-creds, err := grpcserver.BuildTLSCredentials(cfg.TLS)
-if err != nil {
-    log.Fatal("failed to build TLS credentials", zap.Error(err))
-}
-grpcOpts = append(grpcOpts, grpc.Creds(creds))
-```
-
-**开发阶段跳过 TLS**（探针 `GrpcClient.cpp` 中改用 InsecureCredentials）：
-
-```cpp
-// GrpcClient.cpp connect_and_stream() 中临时替换：
-channel_ = grpc::CreateChannel(cfg_.address, grpc::InsecureChannelCredentials());
-```
+- Bean 名 `indexNameResolver` 与 `LogDocument`、`UsbEventDocument` 的 `@Document` SpEL 完全匹配
+- `resolveLogIndex()` → `logs-yyyy.MM.dd`；`resolveUsbIndex()` → `usb-events-yyyy.MM.dd`
+- 前缀从 `application.yml` 读取，可配置
+- **此文件缺失会导致后端启动即报错**，现已修复
 
 ---
 
-## 阶段二：完善探针采集能力
+### ✅ 1.3 Go 网关 — TLS 证书加载（已完成）
 
-> 目标：探针能真正采集到系统日志和 USB 事件，并通过 gRPC 上报
+**实现文件：** `gateway/internal/grpc/server.go`、`config/config.go`、`config/config.toml`、`main.go`
 
-### 2.1 Linux 日志采集（journald）
-
-**文件**：`client/src/probe/SystemLogCollector.cpp`，找到 `#elif defined(PLATFORM_LINUX)` 区块
-
-**替换 `init_linux_journald()` 和 `poll_journald()`：**
-
-```cpp
-#include <systemd/sd-journal.h>
-
-// 类头文件增加成员变量：
-// sd_journal* journal_{nullptr};
-
-void SystemLogCollector::init_linux_journald() {
-    if (sd_journal_open(&journal_, SD_JOURNAL_LOCAL_ONLY) < 0) {
-        spdlog::error("[LogCollector] Failed to open journald");
-        return;
-    }
-    // 移动到最新位置，避免重放历史日志
-    sd_journal_seek_tail(journal_);
-    sd_journal_previous(journal_);
-}
-
-void SystemLogCollector::poll_journald() {
-    int r = sd_journal_wait(journal_, 200000); // 200ms 超时
-    if (r < 0) return;
-
-    SD_JOURNAL_FOREACH_FORWARD(journal_) {
-        const char* msg  = nullptr; size_t len = 0;
-        const char* prio = nullptr; size_t plen = 0;
-
-        sd_journal_get_data(journal_, "MESSAGE",  (const void**)&msg,  &len);
-        sd_journal_get_data(journal_, "PRIORITY", (const void**)&prio, &plen);
-
-        // PRIORITY 格式: "PRIORITY=6"，6=INFO, 4=WARNING, 3=ERROR
-        int priority = prio ? atoi(prio + 9) : 6;
-        terminal::v1::Severity sev = terminal::v1::SEV_INFO;
-        if (priority <= 3) sev = terminal::v1::SEV_CRITICAL;
-        else if (priority == 4) sev = terminal::v1::SEV_ERROR;
-        else if (priority == 5) sev = terminal::v1::SEV_WARNING;
-
-        // 按策略过滤
-        if (sev < policy_mgr_->get_log_level()) continue;
-
-        terminal::v1::LogEntry entry;
-        *entry.mutable_identity() = identity_;
-        *entry.mutable_ts() = google::protobuf::util::TimeUtil::GetCurrentTime();
-        entry.set_severity(sev);
-        entry.set_source("journald");
-        entry.set_message(msg ? std::string(msg + 8, len - 8) : "");  // 跳过 "MESSAGE=" 前缀
-
-        if (callback_) callback_(std::move(entry));
-    }
-}
-```
-
-> **注意**：`SystemLogCollector` 需要持有 `PolicyManager*`，在 `main.cpp` 中传入。
+- `BuildTLSCredentials()`：`tls.LoadX509KeyPair` 加载服务端证书/私钥；`x509.CertPool` 加载 CA；配置 `RequireAndVerifyClientCert`（mTLS）、`MinVersion: TLS 1.2`
+- `TLSConfig` 新增 `Enabled bool` 字段，`config.toml` 默认 `enabled = false`
+- `main.go` 用 `if cfg.TLS.Enabled` 条件启用：`false` 时明文运行并打印警告，`true` 时加载证书启用 mTLS
+- **开发阶段**：保持 `enabled = false`，探针端使用 `InsecureChannelCredentials`，无需证书文件
+- **生产部署**：改为 `enabled = true`，按 `DEPLOYMENT.md` "TLS 证书生成"章节部署三个证书文件
 
 ---
 
-### 2.2 Linux USB 监控（libudev）
+## ✅ 阶段二：完善探针采集能力（已完成）
 
-**文件**：`client/src/probe/UsbMonitor.cpp`，找到 `#elif defined(PLATFORM_LINUX)` 区块
-
-**替换 `init_udev()` 和 `poll_udev()`：**
-
-```cpp
-#include <libudev.h>
-#include <poll.h>
-
-// 类头文件已声明 void* udev_, *udev_mon_
-// 实际类型为 struct udev* 和 struct udev_monitor*
-
-void UsbMonitor::init_udev() {
-    struct udev* u = udev_new();
-    udev_ = u;
-
-    struct udev_monitor* mon = udev_monitor_new_from_netlink(u, "udev");
-    udev_monitor_filter_add_match_subsystem_devtype(mon, "usb", "usb_device");
-    udev_monitor_enable_receiving(mon);
-    udev_mon_ = mon;
-}
-
-void UsbMonitor::poll_udev() {
-    auto* mon = static_cast<struct udev_monitor*>(udev_mon_);
-    int fd = udev_monitor_get_fd(mon);
-
-    struct pollfd fds = {fd, POLLIN, 0};
-    if (poll(&fds, 1, 200) <= 0) return;
-
-    struct udev_device* dev = udev_monitor_receive_device(mon);
-    if (!dev) return;
-
-    const char* action = udev_device_get_action(dev);
-    const char* vid    = udev_device_get_sysattr_value(dev, "idVendor");
-    const char* pid    = udev_device_get_sysattr_value(dev, "idProduct");
-    const char* serial = udev_device_get_sysattr_value(dev, "serial");
-    const char* mfr    = udev_device_get_sysattr_value(dev, "manufacturer");
-    const char* prod   = udev_device_get_sysattr_value(dev, "product");
-
-    terminal::v1::UsbEvent event;
-    *event.mutable_identity() = identity_;
-    *event.mutable_ts() = google::protobuf::util::TimeUtil::GetCurrentTime();
-    event.set_action(action && strcmp(action, "add") == 0
-        ? terminal::v1::USB_CONNECTED
-        : terminal::v1::USB_DISCONNECTED);
-
-    if (vid && pid) {
-        event.set_device_id(std::string("VID_") + vid + "&PID_" + pid);
-    }
-    if (mfr)    event.set_vendor(mfr);
-    if (prod)   event.set_product(prod);
-    if (serial) event.set_serial_number(serial);
-
-    if (callback_) callback_(std::move(event));
-    udev_device_unref(dev);
-}
-```
+> **完成时间**：2025-03-14  
+> **目标达成**：探针在 Linux 上可真实采集 journald 日志和 USB 插拔事件；断网时数据持久化到磁盘 WAL，恢复后自动重传；Windows EvtSubscribe 订阅框架已建立。
 
 ---
 
-### 2.3 Windows 日志采集（EvtSubscribe）
+### ✅ 2.1 Linux 日志采集（journald）（已完成）
 
-**文件**：`client/src/probe/SystemLogCollector.cpp`，找到 `#if defined(PLATFORM_WINDOWS)` 区块
+**实现文件：** `client/src/probe/SystemLogCollector.h/.cpp`
 
-**核心思路**（在类中添加 `EVT_HANDLE subscription_` 成员）：
+**关键实现：**
+- `SystemLogCollector` 构造函数新增 `PolicyManager* policy_mgr = nullptr`，所有平台均支持按策略级别过滤日志
+- `init_linux_journald()`：`sd_journal_open(SD_JOURNAL_LOCAL_ONLY)` 打开本机日志；`seek_tail()` + `previous()` 定位到末尾，**不重放历史日志**；失败时记录错误并安全降级
+- `poll_journald()`：`sd_journal_wait(200ms)` 非忙等等新条目 → `sd_journal_next()` 逐条遍历 → 提取 `MESSAGE`、`PRIORITY`（映射规则：0-2=CRITICAL, 3=ERROR, 4=WARNING, 5-6=INFO, 7=DEBUG 跳过）、`SYSLOG_IDENTIFIER`（作为 source 字段）→ 按策略过滤 → 触发 `callback_`
+- `stop()` 中调用 `sd_journal_close()` 释放资源
 
-```cpp
-// 订阅回调函数（静态）
-static DWORD WINAPI EventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION action,
-                                   PVOID userContext, EVT_HANDLE event) {
-    auto* collector = static_cast<SystemLogCollector*>(userContext);
-    if (action == EvtSubscribeActionDeliver) {
-        // 1. EvtRender(event, ..., EvtRenderEventXml) 获取 XML
-        // 2. 解析 XML 提取: EventID, TimeCreated, Level, Message
-        // 3. 构造 LogEntry 并调用 collector->callback_()
-    }
-    return ERROR_SUCCESS;
-}
-
-void SystemLogCollector::init_windows() {
-    // 订阅 Security 频道（可按需添加 System/Application）
-    subscription_ = EvtSubscribe(
-        nullptr,                          // session
-        nullptr,                          // signal event
-        L"Security",                      // channel
-        L"*[System[Level <= 3]]",         // XPath 过滤（仅 Warning 及以上）
-        nullptr,                          // bookmark
-        this,                             // userContext
-        (EVT_SUBSCRIBE_CALLBACK)EventCallback,
-        EvtSubscribeStartAtOldestRecord   // 改为 EvtSubscribeToFutureEvents 生产用
-    );
-    if (!subscription_) {
-        spdlog::error("[LogCollector] EvtSubscribe failed: {}", GetLastError());
-    }
-}
-```
+**头文件变更：** 新增 `sd_journal* journal_{nullptr}`（Linux 段）和 `PolicyManager* policy_mgr_{nullptr}` 成员
 
 ---
 
-### 2.4 C++ 磁盘 WAL 环形缓冲区
+### ✅ 2.2 Linux USB 监控（libudev）（已完成）
 
-**文件**：`client/src/transport/RingBuffer.cpp`，找到 `write_to_wal()` 和 `recover_from_disk()`
+**实现文件：** `client/src/probe/UsbMonitor.h/.cpp`
 
-**WAL 文件格式（简单二进制）：**
+**关键实现：**
+- `init_udev()`：`udev_new()` 创建上下文 → `udev_monitor_new_from_netlink("udev")` 创建监视器 → `filter_add_match_subsystem_devtype("usb", "usb_device")` 过滤只看 USB 整体设备节点 → `enable_receiving()`；任一步失败均打印错误并安全退出
+- `poll_udev()`：`poll(fd, 200ms)` 非忙等 → `udev_monitor_receive_device()` → 提取 `idVendor`、`idProduct`（组合为 `VID_xxxx&PID_xxxx`，与 Windows 格式统一）、`serial`、`manufacturer`、`product` → 构造 `UsbEvent` → `udev_device_unref()`
+- `cleanup_udev()`：`monitor_loop()` 退出时调用，`udev_monitor_unref()` + `udev_unref()` 防止资源泄漏
+
+**头文件变更：** 新增 `cleanup_udev()` 私有方法；`void* udev_mon_` 注释说明实际类型
+
+---
+
+### ✅ 2.3 Windows EvtSubscribe 日志采集（已完成）
+
+**实现文件：** `client/src/probe/SystemLogCollector.h/.cpp`
+
+**关键实现：**
+- `init_windows()`：`EvtSubscribe(L"Security", XPath, EvtSubscribeToFutureEvents, win_event_callback)` 以异步推送模式订阅；XPath 覆盖 Level ≤ 3 及关键安全 EventID（4624 登录成功、4625 登录失败、4648 显式凭据、4688 进程创建）
+- `win_event_callback()`（静态成员函数）：由 Windows 后台线程调用 → `EvtRender(EvtRenderEventXml)` 获取完整 XML → `WideCharToMultiByte` 转 UTF-8 → 字符串函数提取 `EventID`、`Level`（1=CRITICAL, 2=ERROR, 3=WARNING, 4+=INFO）、`Channel`、`Data` → 按 `policy_mgr_` 过滤 → 触发 `callback_`
+- `poll_windows_event_log()`：EvtSubscribe 为异步回调模式，此函数仅 `sleep(200ms)` 保持采集线程存活
+- `stop()` 中调用 `EvtClose(subscription_)` 清理订阅句柄
+
+**头文件变更：** 新增 `EVT_HANDLE subscription_{nullptr}` 和 `static DWORD WINAPI win_event_callback(...)` 声明
+
+---
+
+### ✅ 2.4 磁盘 WAL 环形缓冲区（已完成）
+
+**实现文件：** `client/src/transport/RingBuffer.cpp`
+
+**WAL 二进制格式（每条记录）：**
 
 ```
-[4字节: 消息长度][N字节: 序列化的 Entry（topic长度 + topic + serialized）]
+[total_len: 4B][topic_len: 4B][topic: N B][data_len: 4B][data: M B][sequence: 8B]
 ```
 
-```cpp
-void RingBuffer::write_to_wal(const Entry& e) {
-    if (disk_path_.empty()) return;
+**关键实现：**
 
-    // 检查磁盘占用，超过上限则丢弃最老的 WAL 文件
-    // TODO: 实现文件轮转（每 50MB 一个新文件）
+| 方法 | 实现说明 |
+|------|---------|
+| `write_to_wal()` | 追加写（`std::ios::app`）；写入前检查文件大小，超过 `disk_max_mb_` 上限时丢弃新条目防止磁盘打满 |
+| `flush_to_disk()` | 持锁后将 `mem_queue_` 中**所有未确认条目**批量追加写入 WAL；析构函数自动调用，确保关机不丢数据 |
+| `recover_from_disk()` | 顺序读取 WAL，解析每条记录压入 `mem_queue_`；更新 `next_seq_` 避免序号冲突；字段长度越界时安全截断；恢复完成后将 WAL 重命名为 `.bak` 保留备份，读取失败时直接删除 |
 
-    std::string wal_file = disk_path_ + "/cache.wal";
-    std::ofstream f(wal_file, std::ios::binary | std::ios::app);
-
-    // 序列化 Entry
-    std::string payload;
-    uint32_t topic_len = e.topic.size();
-    payload.append(reinterpret_cast<char*>(&topic_len), 4);
-    payload.append(e.topic);
-    uint32_t data_len = e.serialized.size();
-    payload.append(reinterpret_cast<char*>(&data_len), 4);
-    payload.append(e.serialized);
-    payload.append(reinterpret_cast<const char*>(&e.sequence), 8);
-
-    uint32_t total_len = payload.size();
-    f.write(reinterpret_cast<char*>(&total_len), 4);
-    f.write(payload.data(), total_len);
-}
-
-void RingBuffer::recover_from_disk() {
-    if (disk_path_.empty()) return;
-    std::string wal_file = disk_path_ + "/cache.wal";
-    std::ifstream f(wal_file, std::ios::binary);
-    if (!f) return;
-
-    // 逐条读取并压入 mem_queue_
-    // 读取完成后删除或重命名 WAL 文件
-    // TODO: 处理文件损坏（checksum 校验）
-}
-```
+**附加改动（`main.cpp`）：**
+- `SystemLogCollector` 构造时传入 `&policy_mgr`
+- `build_identity()` 调用 `get_hostname()` / `get_primary_ip()` / `get_os_version()` 填充真实主机信息（Windows 用 `GetComputerNameA` + `getaddrinfo` + `RtlGetVersion`；Linux/macOS 用 `gethostname` + `getifaddrs` + `uname`）
 
 ---
 

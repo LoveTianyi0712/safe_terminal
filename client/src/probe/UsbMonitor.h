@@ -37,8 +37,9 @@ private:
 #elif defined(PLATFORM_LINUX)
     void init_udev();
     void poll_udev();
-    void* udev_{nullptr};
-    void* udev_mon_{nullptr};
+    void cleanup_udev();        // monitor_loop 退出时释放 udev 资源
+    void* udev_{nullptr};       // struct udev*
+    void* udev_mon_{nullptr};   // struct udev_monitor*
 #elif defined(PLATFORM_MACOS)
     void init_iokit();
     void poll_iokit();
