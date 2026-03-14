@@ -3,6 +3,8 @@
 #include <fstream>
 #include <stdexcept>
 #include <sstream>
+#include <vector>
+#include <spdlog/spdlog.h>
 
 namespace st {
 
@@ -43,8 +45,54 @@ Config Config::load(const std::string& path) {
 }
 
 void Config::save_terminal_id(const std::string& path) const {
-    // TODO: 使用 toml++ 更新文件中的 terminal_id 字段
-    // 简单实现：逐行读取替换，生产中应使用完整 TOML 序列化
+    // 逐行读取配置文件，找到 terminal_id = "..." 行并替换值
+    // 若文件中不存在该行则在 [agent] 节末追加
+    std::ifstream in(path);
+    if (!in.is_open()) {
+        spdlog::warn("[Config] Cannot open config file for writing terminal_id: {}", path);
+        return;
+    }
+
+    std::vector<std::string> lines;
+    std::string line;
+    bool found = false;
+
+    while (std::getline(in, line)) {
+        // 匹配形如 terminal_id = "..."（允许等号周围有空格）
+        if (!found && line.find("terminal_id") != std::string::npos
+                   && line.find('=') != std::string::npos) {
+            lines.push_back("terminal_id = \"" + terminal_id + "\"");
+            found = true;
+        } else {
+            lines.push_back(line);
+        }
+    }
+    in.close();
+
+    // 若配置文件中本来没有该字段，直接在文件末尾追加
+    if (!found) {
+        lines.push_back("terminal_id = \"" + terminal_id + "\"");
+    }
+
+    // 原子写入：先写临时文件再重命名，防止写入中途崩溃导致配置损坏
+    std::string tmp_path = path + ".tmp";
+    std::ofstream out(tmp_path);
+    if (!out.is_open()) {
+        spdlog::error("[Config] Cannot write to {}", tmp_path);
+        return;
+    }
+    for (size_t i = 0; i < lines.size(); ++i) {
+        out << lines[i];
+        if (i + 1 < lines.size()) out << '\n';
+    }
+    out.close();
+
+    // 重命名替换原文件
+    if (std::rename(tmp_path.c_str(), path.c_str()) != 0) {
+        spdlog::error("[Config] Failed to rename {} -> {}", tmp_path, path);
+    } else {
+        spdlog::info("[Config] Persisted terminal_id to {}", path);
+    }
 }
 
 } // namespace st

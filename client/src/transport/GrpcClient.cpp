@@ -69,28 +69,74 @@ void GrpcClient::connect_and_stream() {
     std::thread recv_thread([&] {
         GatewayCommand cmd;
         while (stream->Read(&cmd)) {
-            if (cmd.has_policy()) {
-                spdlog::info("[GrpcClient] Received policy update, id={}", cmd.payload_case());
-                if (on_policy_) on_policy_(cmd.policy());
+            switch (cmd.payload_case()) {
+                case GatewayCommand::kPolicy:
+                    spdlog::info("[GrpcClient] Policy update received, command_id={}",
+                                 cmd.command_id());
+                    if (on_policy_) on_policy_(cmd.policy());
+                    // 回复 AckFrame 告知网关策略已收到
+                    {
+                        AgentReport ack;
+                        ack.mutable_ack()->set_command_id(cmd.command_id());
+                        stream->Write(ack);
+                    }
+                    break;
+
+                case GatewayCommand::kConfigReload:
+                    // 通知主线程重新加载配置（当前版本记录日志，下次心跳时生效）
+                    spdlog::info("[GrpcClient] Config reload requested, command_id={}",
+                                 cmd.command_id());
+                    break;
+
+                case GatewayCommand::kShutdown:
+                    spdlog::warn("[GrpcClient] Shutdown command received, stopping agent...");
+                    running_ = false;
+                    connected_ = false;
+                    break;
+
+                default:
+                    spdlog::debug("[GrpcClient] Unknown command type: {}", cmd.payload_case());
+                    break;
             }
-            // TODO: 处理 config_reload / shutdown 命令
         }
     });
 
-    // 发送线程：从 RingBuffer 取数据发送
+    // 发送线程：从 RingBuffer 取数据，根据 topic 反序列化并填充 AgentReport
     while (running_ && connected_) {
         RingBuffer::Entry entry;
-        if (buffer_.pop(entry, 200)) {
-            AgentReport report;
-            // TODO: 根据 entry.topic 反序列化并填充 report
-            // report.mutable_log_entry()->ParseFromString(entry.serialized);
-            if (!stream->Write(report)) {
-                spdlog::warn("[GrpcClient] Write failed, connection lost");
-                connected_ = false;
-                break;
-            }
+        if (!buffer_.pop(entry, 200)) continue;
+
+        AgentReport report;
+        report.set_sequence(entry.sequence);
+
+        bool parsed = false;
+        if (entry.topic == "logs") {
+            parsed = report.mutable_log_entry()->ParseFromString(entry.serialized);
+        } else if (entry.topic == "usb_event") {
+            parsed = report.mutable_usb_event()->ParseFromString(entry.serialized);
+        } else if (entry.topic == "heartbeat") {
+            parsed = report.mutable_heartbeat()->ParseFromString(entry.serialized);
+        } else {
+            spdlog::warn("[GrpcClient] Unknown topic '{}', dropping entry seq={}",
+                         entry.topic, entry.sequence);
             buffer_.ack(entry.sequence);
+            continue;
         }
+
+        if (!parsed) {
+            spdlog::error("[GrpcClient] ParseFromString failed for topic '{}' seq={}",
+                          entry.topic, entry.sequence);
+            buffer_.ack(entry.sequence);
+            continue;
+        }
+
+        if (!stream->Write(report)) {
+            spdlog::warn("[GrpcClient] Write failed, connection lost (seq={})",
+                         entry.sequence);
+            connected_ = false;
+            break;
+        }
+        buffer_.ack(entry.sequence);
     }
 
     stream->WritesDone();

@@ -75,18 +75,18 @@ function osLabel(os?: number) { return ['未知','Windows','Linux','macOS'][os ?
 onMounted(async () => {
   loading.value = true
   try {
-    const [t, o, alerts] = await Promise.all([
+    const [t, o, alerts, logs, usb] = await Promise.all([
       terminalApi.get(terminalId),
       terminalApi.onlineStatus(terminalId),
       alertApi.list({ terminalId, size: 10 }),
+      http.get('/v1/events/logs', { params: { terminalId, size: 20 } }),
+      http.get('/v1/events/usb',  { params: { terminalId, size: 20 } }),
     ])
     terminal.value       = t as Terminal
     online.value         = (o as any).online
-    terminalAlerts.value = (alerts as any).content
-
-    recentEvents.value = (await http.get('/v1/events/logs', {
-      params: { terminalId, size: 20 },
-    })) as any[]
+    terminalAlerts.value = (alerts as any).content ?? []
+    recentEvents.value   = (logs as any).content   ?? []
+    usbEvents.value      = (usb  as any).content   ?? []
   } finally {
     loading.value = false
   }

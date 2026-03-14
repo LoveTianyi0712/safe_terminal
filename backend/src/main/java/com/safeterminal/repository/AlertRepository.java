@@ -36,4 +36,8 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
     @Modifying
     @Query("UPDATE Alert a SET a.status = :status, a.operator = :operator, a.resolvedAt = :now WHERE a.id = :id")
     int updateStatus(Long id, Integer status, String operator, LocalDateTime now);
+
+    @Modifying
+    @Query("UPDATE Alert a SET a.comment = :comment WHERE a.id = :id")
+    int updateComment(Long id, String comment);
 }

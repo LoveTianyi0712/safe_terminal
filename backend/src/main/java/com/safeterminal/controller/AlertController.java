@@ -51,12 +51,16 @@ public class AlertController {
     }
 
     @PatchMapping("/{id}/resolve")
+    @org.springframework.transaction.annotation.Transactional
     public ResponseEntity<Void> resolve(
             @PathVariable Long id,
             @RequestBody Map<String, String> body,
             Authentication auth) {
         alertRepository.updateStatus(id, 2, auth.getName(), LocalDateTime.now());
-        // TODO: 更新 comment 字段
+        String comment = body.get("comment");
+        if (comment != null && !comment.isBlank()) {
+            alertRepository.updateComment(id, comment);
+        }
         return ResponseEntity.ok().build();
     }
 }

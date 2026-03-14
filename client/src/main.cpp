@@ -144,13 +144,14 @@ static std::string get_os_version() {
 }
 
 // ─── 组装 TerminalIdentity ────────────────────────────────────────────────────
-static terminal::v1::TerminalIdentity build_identity(st::Config& cfg) {
+static terminal::v1::TerminalIdentity build_identity(st::Config& cfg,
+                                                      const std::string& config_path) {
     terminal::v1::TerminalIdentity id;
 
-    // 生成并持久化 terminal_id
+    // 生成并持久化 terminal_id（仅首次启动时执行，重启后复用同一 ID）
     if (cfg.terminal_id.empty()) {
         cfg.terminal_id = generate_uuid();
-        // TODO: 持久化 terminal_id 到配置文件（Config::save_terminal_id()）
+        cfg.save_terminal_id(config_path);   // 写回 config.toml
         spdlog::info("Generated new terminal_id: {}", cfg.terminal_id);
     }
     id.set_terminal_id(cfg.terminal_id);
@@ -203,7 +204,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    auto identity = build_identity(cfg);
+    auto identity = build_identity(cfg, config_path);
 
     // ─── 组件初始化 ──────────────────────────────────────────────────────────
     st::RingBuffer buffer(
