@@ -91,6 +91,68 @@ elseif(APPLE)
   target_link_libraries(st_agent PRIVATE "-framework IOKit" "-framework CoreFoundation")
 endif()
 
-# ─── 安装 ───────────────────────────────────────────────────────────────────
+# ─── 安装规则 ────────────────────────────────────────────────────────────────
 install(TARGETS st_agent DESTINATION bin)
-install(FILES config.toml DESTINATION etc/safe_terminal)
+install(FILES config/config.toml.template
+        DESTINATION etc/safe_terminal
+        RENAME config.toml)
+
+# Linux：安装 systemd 服务单元（默认不启用，由 postinst 脚本处理）
+if(UNIX AND NOT APPLE)
+  install(FILES packaging/linux/st-agent.service
+          DESTINATION lib/systemd/system)
+endif()
+
+# ─── CPack 打包配置 ──────────────────────────────────────────────────────────
+set(CPACK_PACKAGE_NAME            "safe-terminal-agent")
+set(CPACK_PACKAGE_VENDOR          "SafeTerminal")
+set(CPACK_PACKAGE_VERSION_MAJOR   ${PROJECT_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR   ${PROJECT_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH   ${PROJECT_VERSION_PATCH})
+set(CPACK_PACKAGE_VERSION         "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Safe Terminal Agent - 终端安全监控探针")
+set(CPACK_PACKAGE_CONTACT         "admin@safe-terminal.internal")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "SafeTerminal")
+set(CPACK_RESOURCE_FILE_LICENSE   "${CMAKE_SOURCE_DIR}/packaging/LICENSE.txt")
+
+# ── Linux DEB ──────────────────────────────────────────────────────────────
+if(UNIX AND NOT APPLE)
+  set(CPACK_GENERATOR "DEB;RPM")
+
+  # DEB
+  set(CPACK_DEBIAN_PACKAGE_SECTION    "admin")
+  set(CPACK_DEBIAN_PACKAGE_PRIORITY   "optional")
+  set(CPACK_DEBIAN_PACKAGE_MAINTAINER "SafeTerminal <admin@safe-terminal.internal>")
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS    "libssl3 | libssl1.1, libc6 (>= 2.17)")
+  set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
+      "${CMAKE_SOURCE_DIR}/packaging/linux/postinst"
+      "${CMAKE_SOURCE_DIR}/packaging/linux/prerm"
+      "${CMAKE_SOURCE_DIR}/packaging/linux/postrm")
+  set(CPACK_DEBIAN_FILE_NAME          "DEB-DEFAULT")
+
+  # RPM
+  set(CPACK_RPM_PACKAGE_GROUP         "System Environment/Daemons")
+  set(CPACK_RPM_PACKAGE_LICENSE       "Proprietary")
+  set(CPACK_RPM_PACKAGE_REQUIRES      "openssl-libs, glibc >= 2.17")
+  set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE  "${CMAKE_SOURCE_DIR}/packaging/linux/postinst")
+  set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_SOURCE_DIR}/packaging/linux/prerm")
+  set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_SOURCE_DIR}/packaging/linux/postrm")
+  set(CPACK_RPM_FILE_NAME             "RPM-DEFAULT")
+endif()
+
+# ── Windows NSIS ──────────────────────────────────────────────────────────
+if(WIN32)
+  set(CPACK_GENERATOR "NSIS")
+  set(CPACK_NSIS_DISPLAY_NAME        "Safe Terminal Agent")
+  set(CPACK_NSIS_PACKAGE_NAME        "SafeTerminalAgent")
+  set(CPACK_NSIS_INSTALL_ROOT        "C:\\\\Program Files")
+  set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+  set(CPACK_NSIS_MODIFY_PATH         OFF)
+  # 使用自定义 NSIS 脚本（含服务注册逻辑）
+  set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS
+    "ExecWait '\\\"$INSTDIR\\\\bin\\\\install-service.bat\\\"'")
+  set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS
+    "ExecWait '\\\"$INSTDIR\\\\bin\\\\uninstall-service.bat\\\"'")
+endif()
+
+include(CPack)

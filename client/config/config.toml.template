@@ -1,0 +1,38 @@
+# Safe Terminal Agent 配置文件
+# 路径：/etc/safe_terminal/config.toml（Linux/macOS）
+#        C:\ProgramData\SafeTerminal\config.toml（Windows）
+# 安装后请修改 [gateway] address 为实际网关地址
+
+[agent]
+# 终端唯一标识（首次启动自动生成并持久化，请勿手动修改）
+terminal_id   = ""
+agent_version = "1.0.0"
+
+[gateway]
+# ★ 必填：替换为实际部署的接入网关地址（host:port）
+address = "GATEWAY_ADDRESS:50051"
+# TLS 证书路径（留空则以明文模式连接，仅限开发/内网测试）
+ca_cert   = ""
+cert_file = ""
+key_file  = ""
+# 重连策略：指数退避，初始等待 1s，最大 60s
+reconnect_initial_ms = 1000
+reconnect_max_ms     = 60000
+
+[collection]
+# 最低采集日志级别: INFO / WARNING / ERROR / CRITICAL
+log_level              = "WARNING"
+heartbeat_interval_sec = 30
+# USB 监控开关
+usb_monitor_enabled = true
+
+[cache]
+memory_capacity   = 1000   # 内存缓冲最大条目数
+# Linux/macOS 默认路径，Windows 安装时会自动替换
+disk_path         = "/var/lib/safe_terminal/cache"
+disk_max_mb       = 200
+flush_interval_ms = 500
+
+[resource]
+max_cpu_percent = 5.0
+max_memory_mb   = 50

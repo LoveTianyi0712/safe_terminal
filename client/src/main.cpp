@@ -33,6 +33,11 @@
 
 namespace {
 std::atomic<bool> g_running{true};
+// Windows Service 状态句柄（仅服务模式使用）
+#if defined(PLATFORM_WINDOWS)
+SERVICE_STATUS_HANDLE g_svc_status_handle = nullptr;
+SERVICE_STATUS        g_svc_status        = {};
+#endif
 }
 
 static void signal_handler(int) { g_running = false; }
@@ -53,7 +58,6 @@ static std::string generate_uuid() {
     std::uniform_int_distribution<uint64_t> distr;
     char buf[37];
     uint64_t a = distr(eng), b = distr(eng);
-    // 设置版本位 (4) 和变体位
     a = (a & 0xFFFFFFFFFFFF0FFFULL) | 0x0000000000004000ULL;
     b = (b & 0x3FFFFFFFFFFFFFFFULL) | 0x8000000000000000ULL;
     snprintf(buf, sizeof(buf),
@@ -81,61 +85,56 @@ static std::string get_hostname() {
 #endif
 }
 
-// ─── 获取第一个非回环 IPv4 地址 ─────────────────────────────────────────────
+// ─── 获取主要 IPv4 地址 ─────────────────────────────────────────────────────
 static std::string get_primary_ip() {
 #if defined(PLATFORM_WINDOWS)
     char hostname[256] = {};
     DWORD len = sizeof(hostname);
     GetComputerNameA(hostname, &len);
-
-    addrinfo hints{}, *res = nullptr;
-    hints.ai_family   = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo hints = {}, *res = nullptr;
+    hints.ai_family = AF_INET;
     if (getaddrinfo(hostname, nullptr, &hints, &res) == 0 && res) {
         char ip[INET_ADDRSTRLEN] = {};
         inet_ntop(AF_INET,
-                  &reinterpret_cast<sockaddr_in*>(res->ai_addr)->sin_addr,
+                  &reinterpret_cast<struct sockaddr_in*>(res->ai_addr)->sin_addr,
                   ip, sizeof(ip));
         freeaddrinfo(res);
         return ip;
     }
     return "127.0.0.1";
 #else
-    struct ifaddrs* ifa_list = nullptr;
-    getifaddrs(&ifa_list);
-
+    struct ifaddrs* ifa = nullptr;
+    getifaddrs(&ifa);
     std::string result = "127.0.0.1";
-    for (auto* ifa = ifa_list; ifa; ifa = ifa->ifa_next) {
-        if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) continue;
-        auto* addr = reinterpret_cast<sockaddr_in*>(ifa->ifa_addr);
-        // 跳过回环接口
-        if (ntohl(addr->sin_addr.s_addr) == INADDR_LOOPBACK) continue;
-        char ip[INET_ADDRSTRLEN] = {};
-        inet_ntop(AF_INET, &addr->sin_addr, ip, sizeof(ip));
-        result = ip;
-        break; // 取第一个有效地址
+    for (auto* cur = ifa; cur; cur = cur->ifa_next) {
+        if (!cur->ifa_addr || cur->ifa_addr->sa_family != AF_INET) continue;
+        std::string name(cur->ifa_name);
+        if (name == "lo") continue;
+        char buf[INET_ADDRSTRLEN] = {};
+        inet_ntop(AF_INET,
+                  &reinterpret_cast<struct sockaddr_in*>(cur->ifa_addr)->sin_addr,
+                  buf, sizeof(buf));
+        result = buf;
+        break;
     }
-    if (ifa_list) freeifaddrs(ifa_list);
+    if (ifa) freeifaddrs(ifa);
     return result;
 #endif
 }
 
-// ─── 获取 OS 版本字符串 ───────────────────────────────────────────────────────
+// ─── 获取操作系统版本字符串 ─────────────────────────────────────────────────
 static std::string get_os_version() {
 #if defined(PLATFORM_WINDOWS)
-    OSVERSIONINFOEXA osi{};
-    osi.dwOSVersionInfoSize = sizeof(osi);
-    // GetVersionEx 在 Win8.1+ 需要 manifest，此处用 RtlGetVersion（更可靠）
-    using RtlGetVersion_t = LONG(WINAPI*)(OSVERSIONINFOEXA*);
-    auto rtl = reinterpret_cast<RtlGetVersion_t>(
-        GetProcAddress(GetModuleHandleA("ntdll.dll"), "RtlGetVersion"));
-    if (rtl) rtl(&osi);
+    OSVERSIONINFOEXA osvi = {};
+    osvi.dwOSVersionInfoSize = sizeof(osvi);
+#pragma warning(suppress: 4996)
+    GetVersionExA(reinterpret_cast<OSVERSIONINFOA*>(&osvi));
     char buf[64];
     snprintf(buf, sizeof(buf), "Windows %lu.%lu.%lu",
-             osi.dwMajorVersion, osi.dwMinorVersion, osi.dwBuildNumber);
+             osvi.dwMajorVersion, osvi.dwMinorVersion, osvi.dwBuildNumber);
     return buf;
 #elif defined(PLATFORM_LINUX) || defined(PLATFORM_MACOS)
-    struct utsname uts{};
+    struct utsname uts = {};
     uname(&uts);
     return std::string(uts.sysname) + " " + uts.release;
 #else
@@ -143,21 +142,18 @@ static std::string get_os_version() {
 #endif
 }
 
-// ─── 组装 TerminalIdentity ────────────────────────────────────────────────────
+// ─── 构建终端身份 ─────────────────────────────────────────────────────────────
 static terminal::v1::TerminalIdentity build_identity(st::Config& cfg,
                                                       const std::string& config_path) {
     terminal::v1::TerminalIdentity id;
 
-    // 生成并持久化 terminal_id（仅首次启动时执行，重启后复用同一 ID）
     if (cfg.terminal_id.empty()) {
         cfg.terminal_id = generate_uuid();
-        cfg.save_terminal_id(config_path);   // 写回 config.toml
+        cfg.save_terminal_id(config_path);
         spdlog::info("Generated new terminal_id: {}", cfg.terminal_id);
     }
     id.set_terminal_id(cfg.terminal_id);
     id.set_agent_version(cfg.agent_version);
-
-    // 填写主机信息
     id.set_hostname(get_hostname());
     id.set_ip_address(get_primary_ip());
     id.set_os_version(get_os_version());
@@ -175,38 +171,36 @@ static terminal::v1::TerminalIdentity build_identity(st::Config& cfg,
     return id;
 }
 
-int main(int argc, char* argv[]) {
-    // ─── 日志初始化 ──────────────────────────────────────────────────────────
+// ─── 核心 Agent 逻辑（服务模式和控制台模式共享此函数） ──────────────────────
+static void run_agent(const std::string& config_path) {
+    // 日志初始化
 #if defined(PLATFORM_WINDOWS)
     const std::string log_path = "C:/ProgramData/SafeTerminal/agent.log";
 #else
     const std::string log_path = "/var/log/safe_terminal/agent.log";
 #endif
-
     try {
         auto logger = spdlog::rotating_logger_mt(
             "st_agent", log_path, 10 * 1024 * 1024, 3);
         spdlog::set_default_logger(logger);
     } catch (...) {
         // 日志文件创建失败时退化到控制台，不阻断启动
-        spdlog::set_default_logger(spdlog::default_logger());
     }
     spdlog::set_level(spdlog::level::info);
-    spdlog::info("Safe Terminal Agent starting...");
+    spdlog::info("Safe Terminal Agent starting... config={}", config_path);
 
-    // ─── 加载配置 ────────────────────────────────────────────────────────────
-    std::string config_path = (argc > 1) ? argv[1] : "/etc/safe_terminal/config.toml";
+    // 加载配置
     st::Config cfg;
     try {
         cfg = st::Config::load(config_path);
     } catch (const std::exception& e) {
         spdlog::error("Failed to load config: {}", e.what());
-        return 1;
+        return;
     }
 
     auto identity = build_identity(cfg, config_path);
 
-    // ─── 组件初始化 ──────────────────────────────────────────────────────────
+    // 组件初始化
     st::RingBuffer buffer(
         cfg.cache.memory_capacity,
         cfg.cache.disk_path,
@@ -221,29 +215,24 @@ int main(int argc, char* argv[]) {
             policy_mgr.update(p);
         });
 
-    // 日志采集：注入 &policy_mgr 用于按级别过滤
     st::SystemLogCollector log_collector(cfg.collection, identity,
         [&buffer](terminal::v1::LogEntry entry) {
             std::string data;
             entry.SerializeToString(&data);
             buffer.push({0, "logs", std::move(data)});
         },
-        &policy_mgr);  // <-- 传入策略管理器
+        &policy_mgr);
 
-    // USB 监控
     st::UsbMonitor usb_monitor(cfg.collection, identity,
         [&buffer](terminal::v1::UsbEvent event) {
             std::string data;
             event.SerializeToString(&data);
-            buffer.push({0, "usb", std::move(data)});
+            buffer.push({0, "usb_event", std::move(data)});
         });
 
     st::HeartbeatReporter heartbeat(cfg.collection, identity, buffer);
 
-    // ─── 启动所有组件 ────────────────────────────────────────────────────────
-    signal(SIGINT,  signal_handler);
-    signal(SIGTERM, signal_handler);
-
+    // 启动所有组件
     grpc_client.start();
     log_collector.start();
     usb_monitor.start();
@@ -252,12 +241,12 @@ int main(int argc, char* argv[]) {
     spdlog::info("Agent started. terminal_id={} hostname={} ip={}",
                  cfg.terminal_id, identity.hostname(), identity.ip_address());
 
-    // 主线程等待退出信号
+    // 主循环等待退出信号
     while (g_running) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
-    // ─── 优雅关机 ────────────────────────────────────────────────────────────
+    // 优雅关机
     spdlog::info("Shutting down...");
     heartbeat.stop();
     usb_monitor.stop();
@@ -265,7 +254,83 @@ int main(int argc, char* argv[]) {
     grpc_client.stop();
     buffer.flush_to_disk();
     policy_mgr.save(cfg.cache.disk_path + "/policy.bin");
-
     spdlog::info("Agent stopped cleanly.");
+}
+
+// ─── Windows Service API 包装 ─────────────────────────────────────────────────
+#if defined(PLATFORM_WINDOWS)
+
+static std::string g_config_path_svc;
+
+static void report_svc_status(DWORD state, DWORD exit_code = NO_ERROR, DWORD wait_hint = 0) {
+    static DWORD checkpoint = 1;
+    g_svc_status.dwServiceType             = SERVICE_WIN32_OWN_PROCESS;
+    g_svc_status.dwCurrentState            = state;
+    g_svc_status.dwControlsAccepted        = (state == SERVICE_START_PENDING)
+                                             ? 0
+                                             : SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
+    g_svc_status.dwWin32ExitCode           = exit_code;
+    g_svc_status.dwServiceSpecificExitCode = 0;
+    g_svc_status.dwWaitHint                = wait_hint;
+    g_svc_status.dwCheckPoint             = (state == SERVICE_RUNNING || state == SERVICE_STOPPED)
+                                             ? 0
+                                             : checkpoint++;
+    SetServiceStatus(g_svc_status_handle, &g_svc_status);
+}
+
+static VOID WINAPI SvcCtrlHandler(DWORD ctrl) {
+    switch (ctrl) {
+    case SERVICE_CONTROL_STOP:
+    case SERVICE_CONTROL_SHUTDOWN:
+        report_svc_status(SERVICE_STOP_PENDING, NO_ERROR, 5000);
+        g_running = false;
+        break;
+    default:
+        break;
+    }
+}
+
+static VOID WINAPI SvcMain(DWORD /*argc*/, LPSTR* /*argv*/) {
+    g_svc_status_handle = RegisterServiceCtrlHandlerA("SafeTerminalAgent", SvcCtrlHandler);
+    if (!g_svc_status_handle) return;
+
+    report_svc_status(SERVICE_START_PENDING, NO_ERROR, 3000);
+    report_svc_status(SERVICE_RUNNING);
+
+    run_agent(g_config_path_svc);
+
+    report_svc_status(SERVICE_STOPPED);
+}
+
+#endif  // PLATFORM_WINDOWS
+
+// ─── main 入口 ───────────────────────────────────────────────────────────────
+int main(int argc, char* argv[]) {
+#if defined(PLATFORM_WINDOWS)
+    // 默认配置路径（可通过命令行覆盖）
+    g_config_path_svc = (argc > 1) ? argv[1] : "C:/ProgramData/SafeTerminal/config.toml";
+
+    // 尝试以 Windows 服务模式启动；若失败（非服务上下文）则回退到控制台模式
+    SERVICE_TABLE_ENTRYA dispatch_table[] = {
+        { const_cast<LPSTR>("SafeTerminalAgent"), SvcMain },
+        { nullptr, nullptr }
+    };
+    if (!StartServiceCtrlDispatcherA(dispatch_table)) {
+        // ERROR_FAILED_SERVICE_CONTROLLER_CONNECT (1063) 表示不在服务上下文中
+        if (GetLastError() == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT) {
+            // 控制台交互模式
+            signal(SIGINT,  signal_handler);
+            signal(SIGTERM, signal_handler);
+            run_agent(g_config_path_svc);
+        }
+    }
     return 0;
+#else
+    // Linux / macOS：直接运行
+    signal(SIGINT,  signal_handler);
+    signal(SIGTERM, signal_handler);
+    const std::string config_path = (argc > 1) ? argv[1] : "/etc/safe_terminal/config.toml";
+    run_agent(config_path);
+    return 0;
+#endif
 }

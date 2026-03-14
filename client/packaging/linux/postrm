@@ -1,0 +1,25 @@
+#!/bin/sh
+# DEB/RPM 卸载后脚本：清理服务文件，可选删除数据
+
+set -e
+
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload
+fi
+
+# 完全清除（purge）时删除数据目录和配置；普通卸载时保留
+case "$1" in
+    purge)
+        rm -rf /var/lib/safe_terminal
+        rm -rf /var/log/safe_terminal
+        rm -rf /etc/safe_terminal
+        # 删除系统用户（如果存在）
+        if id "st-agent" >/dev/null 2>&1; then
+            userdel st-agent 2>/dev/null || true
+        fi
+        echo "Safe Terminal Agent: all data removed (purge)."
+        ;;
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        echo "Safe Terminal Agent: config and data retained at /etc/safe_terminal and /var/lib/safe_terminal"
+        ;;
+esac

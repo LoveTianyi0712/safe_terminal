@@ -1,0 +1,13 @@
+#!/bin/sh
+# DEB/RPM 卸载前脚本：停止并禁用服务
+
+set -e
+
+if command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet st-agent.service 2>/dev/null; then
+        systemctl stop st-agent.service
+    fi
+    if systemctl is-enabled --quiet st-agent.service 2>/dev/null; then
+        systemctl disable st-agent.service
+    fi
+fi

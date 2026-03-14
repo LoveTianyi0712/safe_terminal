@@ -1,0 +1,37 @@
+[Unit]
+Description=Safe Terminal Agent - 终端安全监控探针
+Documentation=https://github.com/your-org/safe_terminal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/st_agent /etc/safe_terminal/config.toml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+
+# 运行账户（安装时自动创建）
+User=st-agent
+Group=st-agent
+
+# 数据目录
+WorkingDirectory=/var/lib/safe_terminal
+
+# 资源限制：与探针配置保持一致
+CPUQuota=5%
+MemoryMax=100M
+
+# 安全加固
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/safe_terminal /var/log/safe_terminal /etc/safe_terminal
+ProtectHome=yes
+PrivateTmp=yes
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=st-agent
+
+[Install]
+WantedBy=multi-user.target

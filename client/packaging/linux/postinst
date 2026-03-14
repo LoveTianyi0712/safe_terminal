@@ -1,0 +1,47 @@
+#!/bin/sh
+# DEB/RPM 安装后脚本：创建目录、用户、启动服务
+
+set -e
+
+SERVICE_USER="st-agent"
+CONF_DIR="/etc/safe_terminal"
+CACHE_DIR="/var/lib/safe_terminal/cache"
+LOG_DIR="/var/log/safe_terminal"
+CERT_DIR="/etc/safe_terminal/certs"
+TEMPLATE="$CONF_DIR/config.toml"
+
+# 1. 创建专用系统用户（无 shell，无 home）
+if ! id "$SERVICE_USER" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /sbin/nologin "$SERVICE_USER"
+    echo "Created system user: $SERVICE_USER"
+fi
+
+# 2. 创建必要目录并授权
+install -d -m 750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CACHE_DIR"
+install -d -m 750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$LOG_DIR"
+install -d -m 750 -o root          -g "$SERVICE_USER" "$CERT_DIR"
+
+# 3. 如果配置文件不存在则从模板复制（已存在时不覆盖，保留用户配置）
+if [ ! -f "$TEMPLATE" ]; then
+    if [ -f "$CONF_DIR/config.toml.dpkg-new" ]; then
+        mv "$CONF_DIR/config.toml.dpkg-new" "$TEMPLATE"
+    fi
+fi
+chmod 640 "$TEMPLATE" 2>/dev/null || true
+chown root:"$SERVICE_USER" "$TEMPLATE" 2>/dev/null || true
+
+# 4. 注册并启动 systemd 服务
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload
+    systemctl enable st-agent.service
+    systemctl restart st-agent.service
+    echo "Service st-agent started successfully."
+else
+    echo "WARNING: systemctl not found, please start the service manually."
+fi
+
+echo "------------------------------------------------------------"
+echo " Safe Terminal Agent installed."
+echo " Edit $CONF_DIR/config.toml and set [gateway] address,"
+echo " then run: systemctl restart st-agent"
+echo "------------------------------------------------------------"
