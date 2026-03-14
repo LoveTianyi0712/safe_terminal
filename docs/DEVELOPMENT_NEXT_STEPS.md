@@ -5,6 +5,63 @@
 
 ---
 
+## ✅ P0 已完成（2025-03-14）
+
+以下三项 P0 任务已全部实现，后端可正常启动，网关支持开发/生产双模式运行。
+
+### ✅ P0.1 — Spring Security JWT 登录接口（Java 后端）
+
+**涉及文件：** `backend/src/main/java/com/safeterminal/security/`
+
+**实现内容：**
+
+| 文件 | 功能 |
+|------|------|
+| `JwtTokenProvider.java` | 使用 JJWT 0.12.6 生成/解析/校验 Token；Payload 含 `sub`（用户名）、`role`（角色）、`iat`/`exp`；支持 Access Token（24h）和 Refresh Token（7d）|
+| `JwtAuthFilter.java` | `OncePerRequestFilter`，从 `Authorization: Bearer <token>` 头提取并校验 Token，将认证信息写入 `SecurityContextHolder` |
+| `SecurityConfig.java` | 无状态 Session（JWT 模式）；配置公开路径白名单（`/auth/**`、`/ws/**`、`/actuator/health`）；CORS 允许前端开发服务器（localhost:3000）；未认证返回 JSON 401，禁止访问返回 JSON 403 |
+| `UserDetailsServiceImpl.java` | 从 MySQL `sys_user` 表加载用户，角色自动加 `ROLE_` 前缀以兼容 `hasRole()` |
+| `JwtProperties.java` | 绑定 `application.yml` 中 `jwt.*` 配置（secret、expirationMs、refreshExpirationMs）|
+| `AuthController.java` | `POST /auth/login` 返回 `{ token, refreshToken, expiresAt, username, role }`；`POST /auth/refresh` 用 Refresh Token 换新 Access Token；`GET /auth/me` 返回当前用户信息 |
+
+**pom.xml** 已包含 `jjwt-api / jjwt-impl / jjwt-jackson 0.12.6` 依赖。  
+**application.yml** 中 `jwt.secret` 已配置 Base64 密钥（生产环境需替换）。
+
+---
+
+### ✅ P0.2 — ES 动态索引名 Bean（Java 后端）
+
+**新建文件：** `backend/src/main/java/com/safeterminal/config/EsIndexNameResolver.java`
+
+**实现内容：**
+
+- Spring Bean 名称为 `indexNameResolver`，与 `LogDocument` 和 `UsbEventDocument` 中 SpEL 表达式 `@Document(indexName = "#{@indexNameResolver.resolveLogIndex()}")` 完全匹配
+- `resolveLogIndex()` 返回 `logs-yyyy.MM.dd`（当天日志索引）
+- `resolveUsbIndex()` 返回 `usb-events-yyyy.MM.dd`（当天 USB 事件索引）
+- 前缀从 `application.yml` 中 `safe-terminal.es.index.log-prefix` / `usb-prefix` 读取，可灵活修改
+- **此 Bean 缺失时后端启动即报错**（SpEL 解析失败），为阻塞型 Bug，现已修复
+
+---
+
+### ✅ P0.3 — Go 网关 TLS 证书加载（Go 网关）
+
+**涉及文件：**
+
+| 文件 | 改动内容 |
+|------|---------|
+| `gateway/internal/grpc/server.go` | 实现 `BuildTLSCredentials(cfg TLSConfig)`：用 `tls.LoadX509KeyPair` 加载服务端证书/私钥，读取 CA 证书构建 `x509.CertPool`，配置 mTLS（`ClientAuth: RequireAndVerifyClientCert`，`MinVersion: TLS 1.2`）|
+| `gateway/config/config.go` | `TLSConfig` 新增 `Enabled bool` 字段，用于控制是否启用 TLS |
+| `gateway/config/config.toml` | `[tls]` 块新增 `enabled = false`（开发模式默认关闭，不需要准备证书）|
+| `gateway/main.go` | 用 `if cfg.TLS.Enabled` 条件加载 TLS；`enabled=true` 时加载证书并以 mTLS 模式启动；`enabled=false` 时打印警告后以明文模式运行 |
+
+**使用方式：**
+- **开发阶段**：`config.toml` 保持 `enabled = false`，探针端 `GrpcClient.cpp` 使用 `InsecureChannelCredentials`，无需任何证书文件
+- **生产部署**：将 `enabled` 改为 `true`，按 `DEPLOYMENT.md` 中"TLS 证书生成"章节准备三个证书文件后直接启动
+
+---
+
+---
+
 ## 目录
 
 - [优先级总览](#优先级总览)
@@ -18,20 +75,20 @@
 
 ## 优先级总览
 
-| 优先级 | 任务 | 模块 | 预估工作量 |
-|--------|------|------|-----------|
-| P0 | Spring Security JWT 登录接口 | Java 后端 | 0.5 天 |
-| P0 | ES 动态索引名 Bean | Java 后端 | 0.5 天 |
-| P0 | Go 网关 TLS 证书加载 | Go 网关 | 0.5 天 |
-| P1 | C++ Linux USB 监控（libudev） | C++ 探针 | 1 天 |
-| P1 | C++ Linux 日志采集（journald） | C++ 探针 | 1 天 |
-| P1 | C++ Windows 日志采集（EvtSubscribe） | C++ 探针 | 1.5 天 |
-| P1 | C++ 磁盘 WAL 环形缓冲区 | C++ 探针 | 1 天 |
-| P2 | Go 网关 Token 身份验证 | Go 网关 | 0.5 天 |
-| P2 | ES 时间范围检索 + 分页 | Java 后端 | 0.5 天 |
-| P2 | 仪表盘图表接入真实数据 | Vue 前端 | 1 天 |
-| P3 | USB 事件 ES 检索接口 | Java 后端 | 0.5 天 |
-| P3 | 前端登录 + Token 持久化 | Vue 前端 | 0.5 天 |
+| 优先级 | 状态 | 任务 | 模块 | 预估工作量 |
+|--------|------|------|------|-----------|
+| ~~P0~~ | ✅ 已完成 | ~~Spring Security JWT 登录接口~~ | Java 后端 | 0.5 天 |
+| ~~P0~~ | ✅ 已完成 | ~~ES 动态索引名 Bean~~ | Java 后端 | 0.5 天 |
+| ~~P0~~ | ✅ 已完成 | ~~Go 网关 TLS 证书加载~~ | Go 网关 | 0.5 天 |
+| P1 | 待开发 | C++ Linux USB 监控（libudev） | C++ 探针 | 1 天 |
+| P1 | 待开发 | C++ Linux 日志采集（journald） | C++ 探针 | 1 天 |
+| P1 | 待开发 | C++ Windows 日志采集（EvtSubscribe） | C++ 探针 | 1.5 天 |
+| P1 | 待开发 | C++ 磁盘 WAL 环形缓冲区 | C++ 探针 | 1 天 |
+| P2 | 待开发 | Go 网关 Token 身份验证 | Go 网关 | 0.5 天 |
+| P2 | 待开发 | ES 时间范围检索 + 分页 | Java 后端 | 0.5 天 |
+| P2 | 待开发 | 仪表盘图表接入真实数据 | Vue 前端 | 1 天 |
+| P3 | 待开发 | USB 事件 ES 检索接口 | Java 后端 | 0.5 天 |
+| P3 | 待开发 | 前端登录 + Token 持久化 | Vue 前端 | 0.5 天 |
 
 ---
 

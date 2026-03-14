@@ -27,27 +27,45 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { http } from '@/api/http'
+import { useUserStore } from '@/stores/userStore'
 
-const router  = useRouter()
-const loading = ref(false)
-const formRef = ref()
+interface LoginResponse {
+  token:        string
+  refreshToken: string
+  expiresAt:    number
+  username:     string
+  role:         string
+}
+
+const router    = useRouter()
+const userStore = useUserStore()
+const loading   = ref(false)
+const formRef   = ref()
 
 const form = reactive({ username: 'admin', password: '' })
 const rules = {
-  username: [{ required: true, message: '请输入用户名' }],
-  password: [{ required: true, message: '请输入密码' }],
+  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码',   trigger: 'blur' }],
 }
 
 async function login() {
   await formRef.value?.validate()
   loading.value = true
   try {
-    // TODO: 调用 Spring Security 登录接口，返回 JWT Token
-    const res: any = await http.post('/auth/login', form)
-    localStorage.setItem('token', res.token)
+    const res = await http.post<LoginResponse>('/auth/login', form) as unknown as LoginResponse
+
+    // 持久化 Token
+    localStorage.setItem('token',        res.token)
+    localStorage.setItem('refreshToken', res.refreshToken)
+    localStorage.setItem('expiresAt',    String(res.expiresAt))
+
+    // 写入用户 Store
+    userStore.setUser(res.username, res.role)
+
     router.push('/dashboard')
-  } catch {
-    ElMessage.error('用户名或密码错误')
+  } catch (err: any) {
+    const msg = err?.response?.data?.message ?? '用户名或密码错误'
+    ElMessage.error(msg)
   } finally {
     loading.value = false
   }

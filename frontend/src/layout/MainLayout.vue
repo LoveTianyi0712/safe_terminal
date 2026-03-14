@@ -50,11 +50,18 @@
           <el-badge :value="alertStore.openCount" :hidden="alertStore.openCount === 0">
             <el-icon size="20"><Bell /></el-icon>
           </el-badge>
-          <el-dropdown>
-            <el-avatar size="small" :icon="UserFilled" style="cursor:pointer;margin-left:16px" />
+          <el-dropdown style="margin-left:16px">
+            <span class="user-info">
+              <el-avatar size="small" :icon="UserFilled" />
+              <span class="username">{{ userStore.username }}</span>
+              <el-tag size="small" :type="userStore.isAdmin ? 'danger' : 'info'" style="margin-left:6px">
+                {{ userStore.role }}
+              </el-tag>
+            </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item @click="logout">退出登录</el-dropdown-item>
+                <el-dropdown-item disabled>{{ userStore.username }}</el-dropdown-item>
+                <el-dropdown-item divided @click="logout">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -72,11 +79,13 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { UserFilled } from '@element-plus/icons-vue'
 import { useAlertStore } from '@/stores/alertStore'
+import { useUserStore }  from '@/stores/userStore'
 import { useAlertWebSocket } from '@/composables/useWebSocket'
 
-const route     = useRoute()
-const router    = useRouter()
+const route      = useRoute()
+const router     = useRouter()
 const alertStore = useAlertStore()
+const userStore  = useUserStore()
 const isCollapsed = ref(false)
 
 const { connect } = useAlertWebSocket((alert) => {
@@ -85,11 +94,12 @@ const { connect } = useAlertWebSocket((alert) => {
 
 onMounted(() => {
   alertStore.fetchStats()
+  userStore.fetchMe()
   connect()
 })
 
 function logout() {
-  localStorage.removeItem('token')
+  userStore.clearUser()
   router.push('/login')
 }
 </script>
@@ -120,4 +130,6 @@ function logout() {
 }
 .collapse-btn { cursor: pointer; font-size: 20px; }
 .header-right { margin-left: auto; display: flex; align-items: center; }
+.user-info    { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.username     { font-size: 14px; color: #303133; }
 </style>

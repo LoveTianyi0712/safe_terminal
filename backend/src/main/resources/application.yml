@@ -14,7 +14,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: validate   # 生产用 validate，开发用 update
+      ddl-auto: update     # 开发用 update，生产切换为 validate
     show-sql: false
     properties:
       hibernate:
@@ -54,6 +54,14 @@ influxdb:
   token: safe-terminal-influx-token
   org: safe-terminal
   bucket: metrics
+
+# ─── JWT ───────────────────────────────────────────────────────────────────
+jwt:
+  # 生产环境务必替换为随机 Base64(256-bit) 字符串：
+  #   openssl rand -base64 32
+  secret: "c2FmZS10ZXJtaW5hbC1qd3Qtc2VjcmV0LWtleS0yMDI1IQ=="
+  expiration-ms: 86400000    # 24 小时（毫秒）
+  refresh-expiration-ms: 604800000  # 7 天
 
 # ─── 业务配置 ──────────────────────────────────────────────────────────────
 safe-terminal:

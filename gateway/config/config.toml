@@ -21,6 +21,8 @@ policy_channel  = "st:policy:updates"
 ttl_seconds    = 90
 
 [tls]
+# 开发环境设为 false 可跳过证书验证；生产环境务必改为 true
+enabled   = false
 cert_file = "/etc/safe_terminal/certs/server.crt"
 key_file  = "/etc/safe_terminal/certs/server.key"
 ca_file   = "/etc/safe_terminal/certs/ca.crt"

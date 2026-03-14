@@ -41,6 +41,8 @@ type RedisConfig struct {
 }
 
 type TLSConfig struct {
+	// Enabled 为 false 时网关以明文模式启动（仅限开发/测试环境）
+	Enabled  bool   `mapstructure:"enabled"`
 	CertFile string `mapstructure:"cert_file"`
 	KeyFile  string `mapstructure:"key_file"`
 	CAFile   string `mapstructure:"ca_file"`

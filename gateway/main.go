@@ -87,9 +87,18 @@ func main() {
 		),
 	}
 
-	// 生产环境启用 mTLS
-	// creds, err := grpcserver.BuildTLSCredentials(cfg.TLS)
-	// if err == nil { grpcOpts = append(grpcOpts, grpc.Creds(creds)) }
+	// mTLS：由 config.toml [tls] enabled 字段控制
+	// 开发阶段 enabled=false，探针端使用 InsecureChannelCredentials 即可
+	if cfg.TLS.Enabled {
+		creds, err := grpcserver.BuildTLSCredentials(cfg.TLS)
+		if err != nil {
+			log.Fatal("failed to build TLS credentials", zap.Error(err))
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(creds))
+		log.Info("mTLS enabled", zap.String("cert", cfg.TLS.CertFile))
+	} else {
+		log.Warn("TLS disabled — running in plaintext mode (dev only)")
+	}
 
 	grpcSrv := grpc.NewServer(grpcOpts...)
 	pb.RegisterTerminalGatewayServiceServer(grpcSrv, gatewayServer)

@@ -2,13 +2,16 @@ package grpc
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	pb "safe_terminal/gateway/gen/pb"
 	"safe_terminal/gateway/config"
 	kafkaclient "safe_terminal/gateway/internal/kafka"
 	redisclient "safe_terminal/gateway/internal/redis"
-	pb "safe_terminal/gateway/gen/pb"
 	"sync"
 	"time"
 
@@ -225,8 +228,34 @@ func (s *GatewayServer) StartPolicySubscriber(ctx context.Context) {
 }
 
 // BuildTLSCredentials 构建 mTLS 服务端凭证
+//
+// 需要三个文件：
+//   - cfg.CertFile — 服务端证书（server.crt）
+//   - cfg.KeyFile  — 服务端私钥（server.key）
+//   - cfg.CAFile   — 用于验证客户端证书的 CA 证书（ca.crt）
+//
+// 开发阶段可跳过调用此函数，改用 InsecureCredentials（见 main.go 注释）。
 func BuildTLSCredentials(cfg config.TLSConfig) (credentials.TransportCredentials, error) {
-	// TODO: 加载 server.crt / server.key / ca.crt 构建 tls.Config
-	// return credentials.NewTLS(&tls.Config{...}), nil
-	return nil, fmt.Errorf("TLS not configured, implement BuildTLSCredentials")
+	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load server cert/key (%s / %s): %w", cfg.CertFile, cfg.KeyFile, err)
+	}
+
+	caData, err := os.ReadFile(cfg.CAFile)
+	if err != nil {
+		return nil, fmt.Errorf("read CA cert (%s): %w", cfg.CAFile, err)
+	}
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caData) {
+		return nil, fmt.Errorf("failed to parse CA cert: %s", cfg.CAFile)
+	}
+
+	tlsCfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientCAs:    caPool,
+		// mTLS：要求并验证客户端证书（探针端需携带 agent.crt）
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		MinVersion: tls.VersionTLS12,
+	}
+	return credentials.NewTLS(tlsCfg), nil
 }
