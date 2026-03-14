@@ -3,6 +3,7 @@ package com.safeterminal.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safeterminal.domain.entity.Policy;
 import com.safeterminal.repository.PolicyRepository;
+import com.safeterminal.repository.TerminalRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -20,6 +21,7 @@ public class PolicyService {
     private static final String REDIS_POLICY_CHANNEL = "st:policy:updates";
 
     private final PolicyRepository    policyRepository;
+    private final TerminalRepository  terminalRepository;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper        objectMapper;
 
@@ -60,9 +62,21 @@ public class PolicyService {
         policyRepository.findByPolicyId(policyId).ifPresent(policyRepository::delete);
     }
 
+    /**
+     * 查询终端绑定的策略。
+     * 优先返回终端通过 terminal.policy_id 字段绑定的策略；
+     * 若未绑定，则返回第一条默认策略；若无任何策略则返回 null。
+     */
     public Policy getPolicyForTerminal(String terminalId) {
-        // TODO: 查询终端绑定的策略，当前返回默认策略
-        return policyRepository.findAll().stream().findFirst().orElse(null);
+        return terminalRepository.findByTerminalId(terminalId)
+                .map(terminal -> {
+                    String pid = terminal.getPolicyId();
+                    if (pid != null && !pid.isBlank()) {
+                        return policyRepository.findByPolicyId(pid).orElse(null);
+                    }
+                    return null;
+                })
+                .orElseGet(() -> policyRepository.findAll().stream().findFirst().orElse(null));
     }
 
     private void publishToRedis(Policy policy) {

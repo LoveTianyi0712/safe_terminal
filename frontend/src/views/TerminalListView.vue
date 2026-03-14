@@ -82,8 +82,15 @@ async function loadData() {
       page: currentPage.value - 1,
       size: pageSize.value,
     })
-    terminals.value = (page as any).content
-    total.value     = (page as any).totalElements
+    terminals.value = (page as any).content ?? []
+    total.value     = (page as any).totalElements ?? 0
+
+    // 批量查询当前页所有终端的在线状态（一次请求）
+    if (terminals.value.length > 0) {
+      const ids    = terminals.value.map((t: Terminal) => t.terminalId)
+      const status = await terminalApi.batchOnlineStatus(ids)
+      Object.assign(onlineMap, status)
+    }
   } finally {
     loading.value = false
   }

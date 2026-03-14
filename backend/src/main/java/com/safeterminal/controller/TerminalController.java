@@ -9,6 +9,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -43,6 +45,21 @@ public class TerminalController {
     @GetMapping("/stats/online-count")
     public Map<String, Long> onlineCount() {
         return Map.of("count", terminalService.countOnline());
+    }
+
+    /**
+     * 批量查询在线状态（一次 Redis HMGET）
+     *
+     * @param ids 逗号分隔的 terminalId 列表，如 ?ids=id1,id2,id3
+     * @return { "id1": true, "id2": false, ... }
+     */
+    @GetMapping("/online-status")
+    public Map<String, Boolean> batchOnlineStatus(@RequestParam String ids) {
+        List<String> idList = Arrays.stream(ids.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+        return terminalService.batchIsOnline(idList);
     }
 
     @PatchMapping("/{terminalId}")

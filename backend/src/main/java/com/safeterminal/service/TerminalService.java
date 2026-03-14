@@ -13,6 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -57,6 +59,27 @@ public class TerminalService {
     public boolean isOnline(String terminalId) {
         return Boolean.TRUE.equals(
             redisTemplate.opsForHash().hasKey(ONLINE_HASH_KEY, terminalId));
+    }
+
+    /**
+     * 批量查询在线状态，一次 Redis HMGET 替代多次单独查询。
+     *
+     * @param terminalIds 终端 ID 列表
+     * @return 每个 ID 对应是否在线的 Map
+     */
+    public Map<String, Boolean> batchIsOnline(List<String> terminalIds) {
+        if (terminalIds == null || terminalIds.isEmpty()) {
+            return Map.of();
+        }
+        // Redis HMGET 一次取出所有值（在线时值为 IP，不在线时为 null）
+        List<Object> values = redisTemplate.opsForHash()
+                .multiGet(ONLINE_HASH_KEY, new java.util.ArrayList<>(terminalIds));
+
+        Map<String, Boolean> result = new java.util.LinkedHashMap<>(terminalIds.size());
+        for (int i = 0; i < terminalIds.size(); i++) {
+            result.put(terminalIds.get(i), values.get(i) != null);
+        }
+        return result;
     }
 
     public long countOnline() {

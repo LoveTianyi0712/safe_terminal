@@ -94,7 +94,10 @@ const { connect } = useAlertWebSocket((alert) => {
 
 onMounted(() => {
   alertStore.fetchStats()
+  // 先从本地 Token 快速恢复用户信息，再从服务端同步最新状态
+  userStore.setFromToken()
   userStore.fetchMe()
+  userStore.startRefreshTimer()
   connect()
 })
 

@@ -185,6 +185,86 @@
 
 ---
 
+## ✅ P3 已完成（2026-03-14）
+
+以下五项 P3 任务已全部实现，系统端到端功能链路已打通：认证完整、在线状态可查、事件检索具备 USB Tab、策略绑定就绪、时序指标可查。
+
+### ✅ P3.1 — 前端登录 + Token 持久化完善
+
+**涉及文件：** `frontend/src/stores/userStore.ts`、`router/index.ts`、`views/LoginView.vue`、`layout/MainLayout.vue`
+
+**实现内容：**
+
+`userStore.ts` 新增：
+- `setFromToken(token?)` — Base64 解码 JWT Payload 提取 `sub`（用户名）和 `role`，同步写入 `localStorage.expiresAt`（来自 `exp` 字段），无需网络请求即可恢复用户状态
+- `startRefreshTimer()` / `stopRefreshTimer()` — 每 4 分钟触发一次 `refreshTokenIfNeeded()`，距过期 5 分钟内自动用 Refresh Token 换新 Access Token；`clearUser()` 时自动停止定时器
+
+`router/index.ts` 守卫增强：
+- 检测 Token 是否已过期（`expiresAt` 存在且 `< nowSec`）
+- 过期时清除 Token 并跳转登录页（而不是只检查 Token 是否存在）
+
+`LoginView.vue`：登录成功后调用 `setFromToken(res.token)` 并启动刷新定时器。
+
+`MainLayout.vue`：`onMounted` 时先调 `setFromToken()` 快速恢复界面（无闪白），再异步 `fetchMe()` 同步最新角色，并启动刷新定时器。
+
+---
+
+### ✅ P3.2 — 终端列表批量在线状态
+
+**涉及文件：** `backend/.../service/TerminalService.java`、`TerminalController.java`、`frontend/src/api/terminal.ts`、`TerminalListView.vue`
+
+**实现内容：**
+- `TerminalService.batchIsOnline(ids)` — 使用 `RedisTemplate.opsForHash().multiGet()` 一次批量取多个终端在线状态，避免 N 次单独查询
+- `GET /v1/terminals/online-status?ids=id1,id2,...` — 返回 `{terminalId: boolean}` Map
+- `terminal.ts` 新增 `batchOnlineStatus(ids)` API 方法
+- `TerminalListView.vue`：`loadData()` 加载分页数据后，立即批量查询当前页所有终端的在线状态并填充 `onlineMap`（一次网络请求）
+
+---
+
+### ✅ P3.3 — 事件检索 USB 事件 Tab
+
+**涉及文件：** `frontend/src/views/EventSearchView.vue`
+
+**实现内容：**
+- 整体改为 `el-tabs` 双 Tab 布局：**📋 系统日志** / **🔌 USB 事件**
+- 系统日志 Tab：原有功能升级，增加分页（`el-pagination`，与后端 `Page<LogDocument>` 对接），按 `totalElements` 显示总条数
+- USB 事件 Tab：独立搜索表单（terminalId、deviceId、动作下拉、时间范围）；表格展示 timestamp、hostname、动作（接入/移除）、deviceId、厂商、产品名、序列号；支持分页和 CSV 导出
+- 动作过滤在前端进行（后端已支持 `action` 字段，前端额外一层 filter 保证准确性）
+- 两 Tab 共享 `downloadCsv()` 通用函数
+
+---
+
+### ✅ P3.4 — PolicyService.getPolicyForTerminal() 实现
+
+**涉及文件：** `backend/.../service/PolicyService.java`
+
+**实现内容：**
+- 注入 `TerminalRepository`，通过 `terminal_id → Terminal.policyId → Policy` 的链式查找
+- 若终端已绑定 `policyId`：返回对应策略
+- 若终端未绑定（`policyId` 为 null/空）：返回表中第一条作为默认策略
+- 若终端不存在：同样返回默认策略（`orElseGet` 回退）
+- Go 网关从 Redis 订阅策略后可调用此接口推送给对应探针
+
+---
+
+### ✅ P3.5 — InfluxDB 时序查询接口
+
+**新建文件：** `backend/.../service/InfluxQueryService.java`、`controller/MetricsController.java`
+
+**实现内容：**
+
+`InfluxQueryService`：
+- `getUsbTrend(terminalId, hours)` — Flux 查询 `usb_event` measurement，`aggregateWindow(every: 1h, fn: sum)` 统计每小时 CONNECTED 事件数，时间窗口 1~168 小时，返回 `[{time, count}]`
+- `getHeartbeatMetrics(terminalId, minutes)` — Flux `pivot` 将 `cpu_percent`/`mem_percent`/`disk_percent` 三字段合并为宽表，返回 `[{time, cpu, mem, disk}]`，时间窗口 1~1440 分钟
+- 防 Flux 注入（转义 `terminalId` 中的双引号）
+- InfluxDB 不可达时返回空列表并记录 WARN 日志，不影响主服务
+
+`MetricsController`（`/v1/metrics/`）：
+- `GET /v1/metrics/usb-trend?terminalId=xxx&hours=24`
+- `GET /v1/metrics/heartbeat?terminalId=xxx&minutes=60`
+
+---
+
 ---
 
 ## 目录
@@ -212,7 +292,11 @@
 | ~~P2~~ | ✅ 已完成 | ~~Go 网关 Token 身份验证~~ | Go 网关 | 0.5 天 |
 | ~~P2~~ | ✅ 已完成 | ~~ES 时间范围检索 + 分页~~ | Java 后端 | 0.5 天 |
 | ~~P2~~ | ✅ 已完成 | ~~仪表盘图表接入真实数据~~ | Vue 前端 | 1 天 |
-| P3 | 待开发 | 前端登录 + Token 持久化 | Vue 前端 | 0.5 天 |
+| ~~P3~~ | ✅ 已完成 | ~~前端登录 + Token 持久化~~ | Vue 前端 | 0.5 天 |
+| ~~P3~~ | ✅ 已完成 | ~~终端列表批量在线状态~~ | 后端 + 前端 | 0.5 天 |
+| ~~P3~~ | ✅ 已完成 | ~~事件检索 USB Tab~~ | Vue 前端 | 0.5 天 |
+| ~~P3~~ | ✅ 已完成 | ~~PolicyService 终端策略绑定~~ | Java 后端 | 0.5 天 |
+| ~~P3~~ | ✅ 已完成 | ~~InfluxDB 时序查询接口~~ | Java 后端 | 1 天 |
 
 ---
 
@@ -514,10 +598,10 @@ public List<UsbEventDocument> searchUsb(
 | ✅ `EventSearchController.java` | 末尾注释 | `/v1/events/usb` 接口（已完成）|
 | ✅ `StatsService.java` | — | 新建，事件趋势 + 告警分布统计（已完成）|
 | ✅ `StatsController.java` | — | 新建，`/v1/stats/*` 接口（已完成）|
-| ⬜ `PolicyService.java` | `getPolicyForTerminal()` | 查询终端绑定策略 |
+| ✅ `PolicyService.java` | `getPolicyForTerminal()` | 通过 Terminal.policyId 链式查找，回退默认策略（已完成）|
 | ✅ 缺失文件 | — | Spring Security JWT（`security/` 包，已完成）|
 | ✅ 缺失文件 | — | `EsIndexNameResolver` Bean（已完成）|
-| ⬜ 缺失文件 | — | `InfluxDB` 时序查询接口 |
+| ✅ 缺失文件 | — | `InfluxQueryService` + `MetricsController`（`/v1/metrics/*`，已完成）|
 
 ### Vue 前端
 
@@ -525,10 +609,10 @@ public List<UsbEventDocument> searchUsb(
 |------|------|-----------|
 | ✅ `DashboardView.vue` | 图表数据 | 接入真实统计 API（已完成，调用 `/v1/stats/*`）|
 | ✅ `stats.ts` | — | 新建，封装 `statsApi.eventTrend` / `alertDistribution`（已完成）|
-| ⬜ `TerminalListView.vue` | `onlineMap` | 批量查询在线状态填充 |
-| ⬜ `LoginView.vue` | `login()` | 登录成功后解析 token 存 Store |
-| ⬜ 缺失文件 | — | `userStore.ts`（角色权限）|
-| ⬜ 缺失文件 | — | `EventSearchView` USB 事件 Tab |
+| ✅ `TerminalListView.vue` | `onlineMap` | 批量查询在线状态（已完成，调用 `/v1/terminals/online-status`）|
+| ✅ `LoginView.vue` | `login()` | 登录成功后调用 `setFromToken()` + `startRefreshTimer()`（已完成）|
+| ✅ `userStore.ts` | — | `setFromToken()` JWT 解析 + 自动刷新定时器（已完成）|
+| ✅ `EventSearchView.vue` | — | 双 Tab（系统日志 + USB 事件），分页、导出 CSV（已完成）|
 
 ---
 

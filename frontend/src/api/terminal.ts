@@ -35,6 +35,12 @@ export const terminalApi = {
   onlineCount: () =>
     http.get<{ count: number }>('/v1/terminals/stats/online-count'),
 
+  /** 批量查询在线状态，ids 为 terminalId 数组，返回 { id: boolean } Map */
+  batchOnlineStatus: (ids: string[]) =>
+    http.get<Record<string, boolean>>('/v1/terminals/online-status', {
+      params: { ids: ids.join(',') },
+    }),
+
   update: (terminalId: string, data: { department?: string; owner?: string }) =>
     http.patch(`/v1/terminals/${terminalId}`, data),
 }

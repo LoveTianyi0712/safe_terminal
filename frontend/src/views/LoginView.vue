@@ -59,8 +59,10 @@ async function login() {
     localStorage.setItem('refreshToken', res.refreshToken)
     localStorage.setItem('expiresAt',    String(res.expiresAt))
 
-    // 写入用户 Store
-    userStore.setUser(res.username, res.role)
+    // 解析 JWT Payload 写入 Store（同时持久化 username/role）
+    userStore.setFromToken(res.token)
+    // 启动自动刷新定时器
+    userStore.startRefreshTimer()
 
     router.push('/dashboard')
   } catch (err: any) {

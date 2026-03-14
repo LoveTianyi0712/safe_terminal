@@ -58,10 +58,20 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
-  const token = localStorage.getItem('token')
-  if (!token && to.name !== 'Login') {
+  const token     = localStorage.getItem('token')
+  const expiresAt = Number(localStorage.getItem('expiresAt') ?? 0)
+  const nowSec    = Math.floor(Date.now() / 1000)
+
+  // Token 不存在或已过期（expiresAt > 0 时才判断，防止旧版本无该字段时误踢）
+  const expired = token && expiresAt > 0 && expiresAt < nowSec
+
+  if ((!token || expired) && to.name !== 'Login') {
+    if (expired) {
+      localStorage.removeItem('token')
+    }
     return { name: 'Login' }
   }
+
   document.title = `${to.meta.title ?? ''} - 终端安全监控`
 })
 
