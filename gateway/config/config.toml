@@ -1,0 +1,29 @@
+[server]
+grpc_addr       = ":50051"
+max_connections = 10000
+read_timeout    = "30s"
+write_timeout   = "30s"
+
+[kafka]
+brokers          = ["localhost:9092"]
+topic_logs       = "raw-logs"
+topic_usb        = "usb-events"
+topic_heartbeats = "heartbeats"
+batch_size       = 100
+batch_timeout    = "100ms"
+
+[redis]
+addr           = "localhost:6379"
+password       = "safeTerminal@2025"
+db             = 0
+online_hash_key = "st:online:terminals"
+policy_channel  = "st:policy:updates"
+ttl_seconds    = 90
+
+[tls]
+cert_file = "/etc/safe_terminal/certs/server.crt"
+key_file  = "/etc/safe_terminal/certs/server.key"
+ca_file   = "/etc/safe_terminal/certs/ca.crt"
+
+[metrics]
+addr = ":9090"

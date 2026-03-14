@@ -1,0 +1,181 @@
+version: "3.9"
+
+# 本地开发环境：一键启动所有基础设施依赖
+# 用法：docker-compose up -d
+# 关闭：docker-compose down -v
+
+networks:
+  safe_net:
+    driver: bridge
+
+volumes:
+  es_data:
+  influxdb_data:
+  redis_data:
+  mysql_data:
+  kafka_data:
+  zookeeper_data:
+
+services:
+
+  # ─────────────────────────────────────────
+  # Zookeeper（Kafka 依赖）
+  # ─────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.3
+    container_name: st_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+    networks: [safe_net]
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────
+  # Kafka
+  # ─────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.5.3
+    container_name: st_kafka
+    depends_on: [zookeeper]
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # Topic 预创建脚本在 init-kafka 服务中执行
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks: [safe_net]
+    restart: unless-stopped
+    healthcheck:
+      test: kafka-topics --bootstrap-server localhost:9092 --list
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # 初始化 Kafka Topics
+  init-kafka:
+    image: confluentinc/cp-kafka:7.5.3
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 6 --replication-factor 1 --topic raw-logs
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 3 --replication-factor 1 --topic usb-events
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 3 --replication-factor 1 --topic heartbeats
+      echo 'Kafka topics created.'
+      "
+    networks: [safe_net]
+
+  # ─────────────────────────────────────────
+  # Redis 7
+  # ─────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: st_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass "safeTerminal@2025" --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks: [safe_net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "safeTerminal@2025", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # Elasticsearch 8
+  # ─────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
+    container_name: st_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false       # 开发环境关闭安全认证
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks: [safe_net]
+    restart: unless-stopped
+    healthcheck:
+      test: curl -s http://localhost:9200/_cluster/health | grep -q '"status":"green\|yellow"'
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  # Kibana（可选，便于开发调试）
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.12.2
+    container_name: st_kibana
+    depends_on: [elasticsearch]
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    networks: [safe_net]
+    restart: unless-stopped
+    profiles: [tools]  # docker-compose --profile tools up -d 才会启动
+
+  # ─────────────────────────────────────────
+  # InfluxDB 2
+  # ─────────────────────────────────────────
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: st_influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: safeTerminal@2025
+      DOCKER_INFLUXDB_INIT_ORG: safe-terminal
+      DOCKER_INFLUXDB_INIT_BUCKET: metrics
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: safe-terminal-influx-token
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks: [safe_net]
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────
+  # MySQL 8
+  # ─────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: st_mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: safeTerminal@2025
+      MYSQL_DATABASE: safe_terminal
+      MYSQL_USER: st_user
+      MYSQL_PASSWORD: safeTerminal@2025
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/src/main/resources/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    networks: [safe_net]
+    restart: unless-stopped
+    healthcheck:
+      test: mysqladmin ping -h localhost -u root -psafeTerminal@2025
+      interval: 10s
+      timeout: 5s
+      retries: 5

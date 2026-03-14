@@ -1,0 +1,37 @@
+# 客户端探针配置文件
+# 路径：/etc/safe_terminal/config.toml（Linux/macOS）
+#        C:\ProgramData\SafeTerminal\config.toml（Windows）
+
+[agent]
+# 终端唯一标识（首次启动自动生成并持久化）
+terminal_id = ""
+agent_version = "1.0.0"
+
+[gateway]
+address = "gateway.safe-terminal.internal:50051"
+# TLS 证书路径
+ca_cert   = "/etc/safe_terminal/certs/ca.crt"
+cert_file = "/etc/safe_terminal/certs/agent.crt"
+key_file  = "/etc/safe_terminal/certs/agent.key"
+# 重连：初始等待 1s，最大 60s，指数退避
+reconnect_initial_ms  = 1000
+reconnect_max_ms      = 60000
+
+[collection]
+# 最低采集日志级别: INFO / WARNING / ERROR / CRITICAL
+log_level = "WARNING"
+heartbeat_interval_sec = 30
+# USB 监控开关
+usb_monitor_enabled = true
+
+[cache]
+# 环形缓冲区配置
+memory_capacity  = 1000      # 最多缓存 1000 条消息（内存）
+disk_path        = "/var/lib/safe_terminal/cache"
+disk_max_mb      = 200
+flush_interval_ms = 500      # 磁盘刷写间隔
+
+[resource]
+# 探针本身资源限制（仅做软限制，实际靠代码保证）
+max_cpu_percent = 5.0
+max_memory_mb   = 50

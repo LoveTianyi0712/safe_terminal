@@ -1,0 +1,90 @@
+spring:
+  application:
+    name: safe-terminal-backend
+
+  # ─── MySQL ─────────────────────────────────────────────────────────────────
+  datasource:
+    url: jdbc:mysql://localhost:3306/safe_terminal?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: st_user
+    password: safeTerminal@2025
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate   # 生产用 validate，开发用 update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+
+  # ─── Elasticsearch ─────────────────────────────────────────────────────────
+  elasticsearch:
+    uris: http://localhost:9200
+    # username/password 当 ES 开启 xpack.security 时填写
+
+  # ─── Redis ─────────────────────────────────────────────────────────────────
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: safeTerminal@2025
+      lettuce:
+        pool:
+          max-active: 50
+          max-idle: 20
+
+  # ─── Kafka ─────────────────────────────────────────────────────────────────
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: safe-terminal-backend
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      max-poll-records: 500
+    listener:
+      concurrency: 3          # 每个 topic 3 个消费者线程
+
+# ─── InfluxDB ──────────────────────────────────────────────────────────────
+influxdb:
+  url: http://localhost:8086
+  token: safe-terminal-influx-token
+  org: safe-terminal
+  bucket: metrics
+
+# ─── 业务配置 ──────────────────────────────────────────────────────────────
+safe-terminal:
+  kafka:
+    topic:
+      logs: raw-logs
+      usb: usb-events
+      heartbeats: heartbeats
+  alert:
+    usb-threshold-per-hour: 3  # 1小时内插入超过此值触发告警
+  es:
+    index:
+      log-prefix: "logs-"      # 按天分割：logs-2025.04.07
+      usb-prefix: "usb-events-"
+
+# ─── Actuator ──────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+logging:
+  level:
+    com.safeterminal: DEBUG
+    org.springframework.kafka: INFO

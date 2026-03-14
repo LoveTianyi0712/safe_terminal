@@ -1,0 +1,146 @@
+syntax = "proto3";
+
+package terminal.v1;
+
+option go_package = "safe_terminal/gateway/gen/pb;pb";
+option java_package = "com.safeterminal.proto";
+option java_outer_classname = "TerminalProto";
+
+import "google/protobuf/timestamp.proto";
+
+// ─────────────────────────────────────────────
+// 通用枚举
+// ─────────────────────────────────────────────
+
+enum OS {
+  OS_UNKNOWN  = 0;
+  OS_WINDOWS  = 1;
+  OS_LINUX    = 2;   // 国产Linux: 麒麟/统信
+  OS_MACOS    = 3;
+}
+
+enum Severity {
+  SEV_INFO     = 0;
+  SEV_WARNING  = 1;
+  SEV_ERROR    = 2;
+  SEV_CRITICAL = 3;
+}
+
+enum UsbAction {
+  USB_CONNECTED    = 0;
+  USB_DISCONNECTED = 1;
+}
+
+// ─────────────────────────────────────────────
+// 终端身份（每条消息携带）
+// ─────────────────────────────────────────────
+
+message TerminalIdentity {
+  string terminal_id  = 1; // 全局唯一，建议 UUID v5(hostname+MAC)
+  string hostname     = 2;
+  string ip_address   = 3;
+  OS     os           = 4;
+  string os_version   = 5;
+  string agent_version = 6;
+}
+
+// ─────────────────────────────────────────────
+// 心跳 (Heartbeat)
+// ─────────────────────────────────────────────
+
+message Heartbeat {
+  TerminalIdentity          identity    = 1;
+  google.protobuf.Timestamp ts          = 2;
+  double                    cpu_percent = 3;
+  double                    mem_percent = 4;
+  double                    disk_percent = 5;
+  NetworkStats              network     = 6;
+}
+
+message NetworkStats {
+  int64 bytes_sent_total = 1;
+  int64 bytes_recv_total = 2;
+}
+
+// ─────────────────────────────────────────────
+// 系统日志条目 (LogEntry)
+// ─────────────────────────────────────────────
+
+message LogEntry {
+  TerminalIdentity          identity  = 1;
+  google.protobuf.Timestamp ts        = 2;
+  Severity                  severity  = 3;
+  string                    source    = 4;  // e.g. "Security", "auditd", "kernel"
+  string                    event_id  = 5;  // Windows EventID / Linux msgid
+  string                    message   = 6;
+  map<string, string>       extra     = 7;  // 平台特定扩展字段
+}
+
+// ─────────────────────────────────────────────
+// USB 事件 (UsbEvent)
+// ─────────────────────────────────────────────
+
+message UsbEvent {
+  TerminalIdentity          identity     = 1;
+  google.protobuf.Timestamp ts           = 2;
+  UsbAction                 action       = 3;
+  string                    device_id    = 4;  // e.g. VID_1234&PID_5678
+  string                    vendor       = 5;
+  string                    product      = 6;
+  string                    serial_number = 7;
+  string                    drive_letter = 8;  // Windows only
+  string                    mount_point  = 9;  // Linux/macOS
+}
+
+// ─────────────────────────────────────────────
+// 探针 → 网关：上行批量数据帧
+// ─────────────────────────────────────────────
+
+message AgentReport {
+  oneof payload {
+    Heartbeat heartbeat = 1;
+    LogEntry  log_entry = 2;
+    UsbEvent  usb_event = 3;
+    AckFrame  ack       = 4;  // 收到策略后的确认
+  }
+  uint64 sequence = 10; // 单调递增序号，用于断线重传去重
+}
+
+// ─────────────────────────────────────────────
+// 网关 → 探针：下行控制帧
+// ─────────────────────────────────────────────
+
+message GatewayCommand {
+  oneof payload {
+    Policy        policy       = 1;
+    ConfigReload  config_reload = 2;
+    Shutdown      shutdown     = 3;
+  }
+  uint64 command_id = 10;
+}
+
+// ─────────────────────────────────────────────
+// 策略 (Policy)
+// ─────────────────────────────────────────────
+
+message Policy {
+  string   policy_id      = 1;
+  Severity log_level      = 2;  // 最低采集级别
+  repeated string usb_whitelist = 3;  // 允许的 device_id 前缀
+  repeated string usb_blacklist = 4;  // 禁止的 device_id 前缀
+  int32    heartbeat_interval_sec = 5;
+  bool     usb_block_enabled      = 6; // 预留：是否联动禁止挂载
+}
+
+message ConfigReload {}
+message Shutdown {}
+message AckFrame { uint64 command_id = 1; }
+
+// ─────────────────────────────────────────────
+// gRPC 服务定义
+// ─────────────────────────────────────────────
+
+service TerminalGatewayService {
+  // 双向流：探针上报数据，网关下发策略/命令
+  rpc Connect(stream AgentReport) returns (stream GatewayCommand);
+}
