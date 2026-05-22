@@ -120,11 +120,21 @@ public class SoftwareCheckService
                         var systemComponent = sub.GetValue("SystemComponent");
                         if (systemComponent is int sc && sc == 1) continue;
 
+                        var installLoc = sub.GetValue("InstallLocation")?.ToString()?.Trim();
+
+                        // Skip entries whose InstallLocation is set but directory is gone —
+                        // these are residual registry entries left by faulty uninstallers.
+                        if (!string.IsNullOrWhiteSpace(installLoc) && !Directory.Exists(installLoc))
+                        {
+                            progress?.Report($"[INFO] 跳过注册表残留（目录不存在）: {name}");
+                            continue;
+                        }
+
                         results.Add(new SoftwareItem
                         {
                             Name = name,
                             Version = sub.GetValue("DisplayVersion")?.ToString(),
-                            InstallLocation = sub.GetValue("InstallLocation")?.ToString(),
+                            InstallLocation = installLoc,
                             Publisher = sub.GetValue("Publisher")?.ToString()
                         });
                     }
@@ -154,11 +164,18 @@ public class SoftwareCheckService
                         if (string.IsNullOrWhiteSpace(name)) continue;
                         if (!seen.Add(name)) continue;
 
+                        var installLoc = sub.GetValue("InstallLocation")?.ToString()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(installLoc) && !Directory.Exists(installLoc))
+                        {
+                            progress?.Report($"[INFO] 跳过注册表残留（目录不存在）: {name}");
+                            continue;
+                        }
+
                         results.Add(new SoftwareItem
                         {
                             Name = name,
                             Version = sub.GetValue("DisplayVersion")?.ToString(),
-                            InstallLocation = sub.GetValue("InstallLocation")?.ToString(),
+                            InstallLocation = installLoc,
                             Publisher = sub.GetValue("Publisher")?.ToString()
                         });
                     }

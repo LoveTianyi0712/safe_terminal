@@ -65,7 +65,9 @@ public class MainViewModel : BaseViewModel
     public ICommand ReviewResultsCommand { get; }
 
     public bool CanReviewResults => _canSaveReport && _lastReport != null &&
-        (_lastReport.WeChatSensitiveFiles.Count > 0 || _lastReport.FullScanSensitiveFiles.Count > 0);
+        (_lastReport.WeChatSensitiveFiles.Count > 0 ||
+         _lastReport.OfficeSoftwareScans.Any(r => r.SensitiveFiles.Count > 0) ||
+         _lastReport.FullScanSensitiveFiles.Count > 0);
 
     public MainViewModel()
     {
@@ -88,8 +90,9 @@ public class MainViewModel : BaseViewModel
             new CheckItemViewModel { Order = 5, Name = "远程控制软件检测" },
             new CheckItemViewModel { Order = 6, Name = "虚拟机安装检测" },
             new CheckItemViewModel { Order = 7, Name = "网卡数量及外网检测" },
-            new CheckItemViewModel { Order = 8, Name = "微信敏感文件扫描" },
-            new CheckItemViewModel { Order = 9, Name = "全盘敏感文件扫描" },
+            new CheckItemViewModel { Order = 8,  Name = "微信敏感文件扫描" },
+            new CheckItemViewModel { Order = 9,  Name = "办公软件敏感文件扫描" },
+            new CheckItemViewModel { Order = 10, Name = "全盘敏感文件扫描" },
         };
 
         foreach (var item in items)
@@ -124,7 +127,7 @@ public class MainViewModel : BaseViewModel
 
     private async Task RunScanAsync(CancellationToken ct)
     {
-        var report = new ComplianceReport { ToolVersion = "1.1.0" };
+        var report = new ComplianceReport { ToolVersion = "1.2.1" };
         var logProgress = new Progress<string>(msg =>
         {
             App.Current.Dispatcher.Invoke(() =>
@@ -287,17 +290,44 @@ public class MainViewModel : BaseViewModel
             if (ct.IsCancellationRequested) { FinalizePartial(report); return; }
             UpdateProgress(8);
 
-            // Step 9: Full disk scan (long-running, uses sub-progress)
+            // Step 9: Office software scan
             await RunStep(9, report, ct, () =>
             {
-                SetItemRunning(9, "准备扫描...");
+                SetItemRunning(9, "正在检测常用办公软件...");
+                var svc = new OfficeSoftwareScanService(patterns, settings.WeChatScan);
+                report.OfficeSoftwareScans = svc.ScanAll(logProgress, ct);
+
+                var installed = report.OfficeSoftwareScans.Where(r => r.IsInstalled).ToList();
+                var withHits  = installed.Where(r => r.SensitiveFiles.Count > 0).ToList();
+
+                if (withHits.Count == 0)
+                {
+                    var names = installed.Count > 0
+                        ? $"检测到 {string.Join("/", installed.Select(r => r.AppName))}，未发现敏感文件"
+                        : "未检测到相关办公软件";
+                    SetItemPass(9, names);
+                }
+                else
+                {
+                    var summary = string.Join("  ", withHits.Select(r => $"{r.AppName}:{r.SensitiveFiles.Count}个"));
+                    SetItemFail(9, $"发现敏感文件 — {summary}");
+                }
+                return Task.CompletedTask;
+            });
+            if (ct.IsCancellationRequested) { FinalizePartial(report); return; }
+            UpdateProgress(9);
+
+            // Step 10: Full disk scan (long-running, uses sub-progress)
+            await RunStep(10, report, ct, () =>
+            {
+                SetItemRunning(10, "准备扫描...");
                 var diskSvc = new FullDiskScanService(patterns, settings.FullScan);
 
                 var subProgress = new Progress<(int scanned, int total)>(p =>
                 {
                     App.Current.Dispatcher.Invoke(() =>
                     {
-                        var item = CheckItems[8];  // index 8 = order 9
+                        var item = CheckItems[9];  // index 9 = order 10
                         item.SubProgress = p.total > 0 ? (double)p.scanned / p.total * 100 : 0;
                         item.ShowSubProgress = true;
                         item.Summary = $"扫描中 {p.scanned:N0}/{p.total:N0} ({item.SubProgress:F0}%)";
@@ -307,11 +337,11 @@ public class MainViewModel : BaseViewModel
 
                 report.FullScanSensitiveFiles = diskSvc.Scan(logProgress, subProgress, ct);
 
-                App.Current.Dispatcher.Invoke(() => CheckItems[8].ShowSubProgress = false);
+                App.Current.Dispatcher.Invoke(() => CheckItems[9].ShowSubProgress = false);
 
                 if (report.FullScanSensitiveFiles.Count == 0)
                 {
-                    SetItemPass(9, "未发现敏感文件");
+                    SetItemPass(10, "未发现敏感文件");
                 }
                 else
                 {
@@ -321,11 +351,11 @@ public class MainViewModel : BaseViewModel
                         .OrderByDescending(g => g.Count())
                         .Select(g => $"{g.Key}×{g.Count()}")
                         .Take(3);
-                    SetItemFail(9, $"发现 {report.FullScanSensitiveFiles.Count} 个文件（{string.Join(" ", typeSummary)}）");
+                    SetItemFail(10, $"发现 {report.FullScanSensitiveFiles.Count} 个文件（{string.Join(" ", typeSummary)}）");
                 }
                 return Task.CompletedTask;
             });
-            UpdateProgress(9);
+            UpdateProgress(10);
 
             // Complete
             _lastReport = report;
@@ -436,10 +466,17 @@ public class MainViewModel : BaseViewModel
     private void ReviewResults()
     {
         if (_lastReport == null) return;
-        var win = new Views.SensitiveFileReviewWindow(_lastReport.WeChatSensitiveFiles,
-                                                      _lastReport.FullScanSensitiveFiles);
+
+        // Flatten all office software scan results into a combined list keyed by app name
+        var officeFiles = _lastReport.OfficeSoftwareScans
+            .Where(r => r.SensitiveFiles.Count > 0)
+            .ToList();
+
+        var win = new Views.SensitiveFileReviewWindow(
+            _lastReport.WeChatSensitiveFiles,
+            officeFiles,
+            _lastReport.FullScanSensitiveFiles);
         win.ShowDialog();
-        // CanReviewResults re-evaluated after dialog closes (list may have shrunk)
         OnPropertyChanged(nameof(CanReviewResults));
     }
 

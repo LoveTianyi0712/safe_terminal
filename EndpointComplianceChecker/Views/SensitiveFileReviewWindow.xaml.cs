@@ -23,13 +23,17 @@ public class SensitiveFileReviewItem : INotifyPropertyChanged
     public string PatternSummary { get; }
     public SensitiveFileResult Original { get; }
 
+    // Back-reference so delete can remove from the correct list
+    public List<SensitiveFileResult> OwnerList { get; }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public SensitiveFileReviewItem(SensitiveFileResult result, string source)
+    public SensitiveFileReviewItem(SensitiveFileResult result, string source, List<SensitiveFileResult> ownerList)
     {
-        FilePath  = result.Path;
-        Source    = source;
-        Original  = result;
+        FilePath   = result.Path;
+        Source     = source;
+        Original   = result;
+        OwnerList  = ownerList;
 
         var patterns = result.MatchCounts.Count > 0
             ? result.MatchCounts.Select(kv => $"{kv.Key}×{kv.Value}")
@@ -40,18 +44,21 @@ public class SensitiveFileReviewItem : INotifyPropertyChanged
 
 public partial class SensitiveFileReviewWindow : Window
 {
-    private readonly List<SensitiveFileResult> _wechatList;
-    private readonly List<SensitiveFileResult> _fullList;
+    private readonly List<SensitiveFileResult>          _wechatList;
+    private readonly List<OfficeSoftwareScanResult>     _officeScans;
+    private readonly List<SensitiveFileResult>          _fullList;
 
     private readonly List<SensitiveFileReviewItem> _allItems    = new();
     private          List<SensitiveFileReviewItem> _visibleItems = new();
 
     public SensitiveFileReviewWindow(
-        List<SensitiveFileResult> wechatFiles,
-        List<SensitiveFileResult> fullFiles)
+        List<SensitiveFileResult>      wechatFiles,
+        List<OfficeSoftwareScanResult> officeScans,
+        List<SensitiveFileResult>      fullFiles)
     {
-        _wechatList = wechatFiles;
-        _fullList   = fullFiles;
+        _wechatList  = wechatFiles;
+        _officeScans = officeScans;
+        _fullList    = fullFiles;
 
         InitializeComponent();
         BuildItemList();
@@ -64,8 +71,13 @@ public partial class SensitiveFileReviewWindow : Window
     private void BuildItemList()
     {
         _allItems.Clear();
-        foreach (var r in _wechatList) _allItems.Add(new SensitiveFileReviewItem(r, "微信"));
-        foreach (var r in _fullList)   _allItems.Add(new SensitiveFileReviewItem(r, "全盘"));
+        foreach (var r in _wechatList)
+            _allItems.Add(new SensitiveFileReviewItem(r, "微信", _wechatList));
+        foreach (var appResult in _officeScans)
+            foreach (var r in appResult.SensitiveFiles)
+                _allItems.Add(new SensitiveFileReviewItem(r, appResult.AppName, appResult.SensitiveFiles));
+        foreach (var r in _fullList)
+            _allItems.Add(new SensitiveFileReviewItem(r, "全盘", _fullList));
 
         // Subscribe to checkbox changes so button state and count update live
         foreach (var item in _allItems)
@@ -74,7 +86,10 @@ public partial class SensitiveFileReviewWindow : Window
 
     private void PopulateFilters()
     {
-        CmbSource.ItemsSource   = new[] { "全部来源", "微信", "全盘" };
+        var sources = new[] { "全部来源" }
+            .Concat(_allItems.Select(i => i.Source).Distinct().OrderBy(s => s))
+            .ToArray();
+        CmbSource.ItemsSource   = sources;
         CmbSource.SelectedIndex = 0;
 
         RefreshExtensionFilter();
@@ -155,8 +170,7 @@ public partial class SensitiveFileReviewWindow : Window
                 if (File.Exists(item.FilePath)) File.Delete(item.FilePath);
                 deleted++;
                 item.PropertyChanged -= Item_CheckChanged;
-                _wechatList.Remove(item.Original);
-                _fullList.Remove(item.Original);
+                item.OwnerList.Remove(item.Original);
                 _allItems.Remove(item);
             }
             catch (Exception ex)
