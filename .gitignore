@@ -2,6 +2,11 @@
 EndpointComplianceChecker/bin/
 EndpointComplianceChecker/obj/
 
+# Publish binaries — distributed via GitHub Releases, not git
+publish/*.exe
+publish/*.pdb
+publish/*.dll
+
 # User-specific files
 *.user
 *.suo

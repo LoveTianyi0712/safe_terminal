@@ -40,7 +40,7 @@ public class ConfigService
     public List<PirateSoftwareRule> LoadPirateSoftwareRules()
     {
         return LoadJson<List<PirateSoftwareRule>>("pirate_software_rules.json")
-               ?? new List<PirateSoftwareRule>();
+               ?? DefaultPirateSoftwareRules();
     }
 
     public ScanSettings LoadScanSettings()
@@ -108,4 +108,23 @@ public class ConfigService
 
     private static List<string> DefaultRemoteControlNames() =>
         new() { "todesk", "向日葵", "sunlogin", "teamviewer", "anydesk" };
+
+    private static List<PirateSoftwareRule> DefaultPirateSoftwareRules() => new()
+    {
+        new() { Name = "Adobe Photoshop",
+            Detection = new() { Type = "registry", Path = @"HKLM\SOFTWARE\Adobe\Photoshop",
+                PirateIndicator = new() { "破解", "Crack", "Keygen", "Patch", "激活" } } },
+        new() { Name = "Adobe Premiere",
+            Detection = new() { Type = "file", Path = "",
+                PirateIndicator = new() { "破解", "Crack", "Keygen", "Patch", "amtlib" } } },
+        new() { Name = "Microsoft Office",
+            Detection = new() { Type = "registry", Path = @"HKLM\SOFTWARE\Microsoft\Office",
+                PirateIndicator = new() { "KMSpico", "KMSAuto", "破解", "Crack" } } },
+        new() { Name = "AutoCAD",
+            Detection = new() { Type = "file", Path = "",
+                PirateIndicator = new() { "破解", "Crack", "keygen", "xforce" } } },
+        new() { Name = "CorelDRAW",
+            Detection = new() { Type = "file", Path = "",
+                PirateIndicator = new() { "破解", "Crack", "Keygen" } } },
+    };
 }

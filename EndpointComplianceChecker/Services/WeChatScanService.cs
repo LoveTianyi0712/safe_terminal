@@ -28,6 +28,13 @@ public class WeChatScanService
     {
         progress?.Report("正在查找微信存储路径...");
 
+        // Verify WeChat is actually installed (exe must exist) before scanning
+        if (!IsWeChatInstalled(progress))
+        {
+            progress?.Report("[INFO] 未找到微信可执行文件，视为未安装");
+            return null;
+        }
+
         // Try multiple candidate base paths and return the first one that exists
         foreach (var basePath in GetWeChatBaseCandidates(progress))
         {
@@ -68,43 +75,62 @@ public class WeChatScanService
     /// <summary>Returns candidate WeChat file storage base directories in priority order.</summary>
     private static IEnumerable<string> GetWeChatBaseCandidates(IProgress<string>? progress)
     {
-        var docs   = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        var user   = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var docs      = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var user      = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var appData   = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
-        // 1. Read FileSavePath from registry (user-configured storage location)
-        string? regPath = null;
-        try
+        // 1. Registry: multiple keys for FileSavePath / MyFilePath
+        var regKeys = new[]
         {
-            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Tencent\WeChat");
-            regPath = key?.GetValue("FileSavePath")?.ToString();
-            if (!string.IsNullOrWhiteSpace(regPath))
-                progress?.Report($"[INFO] 注册表 FileSavePath = {regPath}");
-        }
-        catch { }
-
-        if (!string.IsNullOrWhiteSpace(regPath) &&
-            !regPath!.Equals("MyDocument", StringComparison.OrdinalIgnoreCase) &&
-            Path.IsPathRooted(regPath))
+            (@"Software\Tencent\WeChat",                           "FileSavePath"),
+            (@"Software\Tencent\WeChat",                           "MyFilePath"),
+            (@"SOFTWARE\WOW6432Node\Tencent\WeChat",               "FileSavePath"),
+            (@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\WeChat", "InstallLocation"),
+        };
+        foreach (var (subKey, valueName) in regKeys)
         {
-            yield return regPath;
-            yield return Path.Combine(regPath, "WeChat Files");
+            string? regPath = null;
+            try
+            {
+                // Try HKCU first, then HKLM
+                foreach (var hive in new[] { Registry.CurrentUser, Registry.LocalMachine })
+                {
+                    using var key = hive.OpenSubKey(subKey);
+                    regPath = key?.GetValue(valueName)?.ToString();
+                    if (!string.IsNullOrWhiteSpace(regPath)) break;
+                }
+            }
+            catch { }
+
+            if (!string.IsNullOrWhiteSpace(regPath) &&
+                !regPath!.Equals("MyDocument", StringComparison.OrdinalIgnoreCase) &&
+                Path.IsPathRooted(regPath))
+            {
+                progress?.Report($"[INFO] 微信注册表 {valueName} = {regPath}");
+                yield return regPath;
+                yield return Path.Combine(regPath, "WeChat Files");
+            }
         }
 
-        // 2. Standard locations
-        yield return Path.Combine(docs,    "WeChat Files");
-        yield return Path.Combine(user,    "Documents", "WeChat Files");
-        yield return Path.Combine(appData, "Tencent", "WeChat", "WeChat Files");
-        yield return Path.Combine(user,    "WeChat Files");
+        // 2. Standard user profile locations
+        yield return Path.Combine(docs,      "WeChat Files");
+        yield return Path.Combine(user,      "Documents",  "WeChat Files");
+        yield return Path.Combine(user,      "WeChat Files");
+        yield return Path.Combine(appData,   "Tencent",    "WeChat", "WeChat Files");
+        yield return Path.Combine(localData, "Tencent",    "WeChat");
 
-        // 3. Look for WeChat Files on all fixed drives (handles custom install drives)
+        // 3. All fixed drives — handles cases where user moved WeChat to D:/ etc.
         foreach (var drive in DriveInfo.GetDrives()
                      .Where(d => d.DriveType == DriveType.Fixed && d.IsReady)
                      .Select(d => d.RootDirectory.FullName))
         {
             yield return Path.Combine(drive, "WeChat Files");
-            yield return Path.Combine(drive, "Users",
-                Environment.UserName, "Documents", "WeChat Files");
+            yield return Path.Combine(drive, "Users", Environment.UserName, "Documents", "WeChat Files");
+            yield return Path.Combine(drive, "Users", Environment.UserName, "WeChat Files");
+            // Some users install WeChat to a non-default drive
+            yield return Path.Combine(drive, "Program Files",        "Tencent", "WeChat", "WeChat Files");
+            yield return Path.Combine(drive, "Program Files (x86)",  "Tencent", "WeChat", "WeChat Files");
         }
     }
 
@@ -273,6 +299,59 @@ public class WeChatScanService
         fs.Read(buf, 0, readLen);
         try { return Encoding.UTF8.GetString(buf); }
         catch { return Encoding.Default.GetString(buf); }
+    }
+
+    /// <summary>
+    /// Checks that WeChat.exe actually exists on disk, preventing false positives
+    /// when WeChat has been uninstalled but left behind data directories.
+    /// </summary>
+    private static bool IsWeChatInstalled(IProgress<string>? progress)
+    {
+        // 1. Registry InstallPath
+        string? installPath = null;
+        foreach (var (hive, subKey) in new (RegistryKey, string)[]
+        {
+            (Registry.CurrentUser,  @"Software\Tencent\WeChat"),
+            (Registry.LocalMachine, @"SOFTWARE\WOW6432Node\Tencent\WeChat"),
+            (Registry.LocalMachine, @"SOFTWARE\Tencent\WeChat"),
+        })
+        {
+            try
+            {
+                using var key = hive.OpenSubKey(subKey);
+                installPath = key?.GetValue("InstallPath")?.ToString();
+                if (!string.IsNullOrWhiteSpace(installPath)) break;
+            }
+            catch { }
+        }
+
+        if (!string.IsNullOrWhiteSpace(installPath))
+        {
+            var exePath = Path.Combine(installPath!, "WeChat.exe");
+            if (File.Exists(exePath)) { progress?.Report($"[INFO] 微信已安装: {exePath}"); return true; }
+        }
+
+        // 2. Common Program Files paths
+        foreach (var dir in new[]
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),      "Tencent", "WeChat"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),   "Tencent", "WeChat"),
+        })
+        {
+            var exePath = Path.Combine(dir, "WeChat.exe");
+            if (File.Exists(exePath)) { progress?.Report($"[INFO] 微信已安装: {exePath}"); return true; }
+        }
+
+        // 3. All fixed drives
+        foreach (var drive in DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady))
+        {
+            var exePath = Path.Combine(drive.RootDirectory.FullName, "Program Files", "Tencent", "WeChat", "WeChat.exe");
+            if (File.Exists(exePath)) { progress?.Report($"[INFO] 微信已安装: {exePath}"); return true; }
+            var exePath2 = Path.Combine(drive.RootDirectory.FullName, "Program Files (x86)", "Tencent", "WeChat", "WeChat.exe");
+            if (File.Exists(exePath2)) { progress?.Report($"[INFO] 微信已安装: {exePath2}"); return true; }
+        }
+
+        return false;
     }
 
     private static string ReadOfficeXmlText(string path)

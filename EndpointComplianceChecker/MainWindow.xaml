@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:EndpointComplianceChecker.ViewModels"
         xmlns:conv="clr-namespace:EndpointComplianceChecker.Converters"
-        Title="终端合规性检查工具 v1.1"
+        Title="终端合规性检查工具 v1.2"
+        Icon="Resources/app.png"
         Width="1000" Height="650"
         MinWidth="800" MinHeight="520"
         WindowStartupLocation="CenterScreen"
@@ -80,7 +81,7 @@
                 <TextBlock Grid.Column="1" VerticalAlignment="Center"
                            Foreground="#A8C6DA" FontSize="11">
                     <TextBlock.Text>
-                        <MultiBinding StringFormat="版本 v1.1  |  进度 {0:F0}%">
+                        <MultiBinding StringFormat="版本 v1.2  |  进度 {0:F0}%">
                             <Binding Path="OverallProgress"/>
                         </MultiBinding>
                     </TextBlock.Text>

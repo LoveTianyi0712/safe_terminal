@@ -56,6 +56,15 @@ public class ReportService
                 new { name = s.Name, version = s.Version, install_location = s.InstallLocation }),
             wechat_sensitive_files = report.WeChatSensitiveFiles.Select(f =>
                 new { path = f.Path, matched_patterns = f.MatchedPatterns }),
+            office_software_scans = report.OfficeSoftwareScans.Select(r => new
+            {
+                app_name     = r.AppName,
+                is_installed = r.IsInstalled,
+                data_path    = r.DataPath,
+                sensitive_files_count = r.SensitiveFiles.Count,
+                sensitive_files = r.SensitiveFiles.Select(f =>
+                    new { path = f.Path, matched_patterns = f.MatchedPatterns })
+            }),
             full_scan_sensitive_files = report.FullScanSensitiveFiles.Select(f =>
                 new { path = f.Path, matched_patterns = f.MatchedPatterns }),
             error_log = report.ErrorLog
@@ -69,8 +78,11 @@ public class ReportService
     {
         var sb = new StringBuilder(32768);
 
+        int officeSensitiveTotal = report.OfficeSoftwareScans.Sum(r => r.SensitiveFiles.Count);
+
         bool hasViolation = report.PirateSoftware.Count > 0 ||
                             report.WeChatSensitiveFiles.Count > 0 ||
+                            officeSensitiveTotal > 0 ||
                             report.FullScanSensitiveFiles.Count > 0;
         bool hasWarning = report.RemoteControlSoftware.Count > 0 ||
                           report.OsLicenseStatus.Contains("复核") ||
@@ -164,7 +176,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#F7FAFC}
 
         // ---- SUMMARY CARDS ----
         int totalItems = report.PirateSoftware.Count + report.RemoteControlSoftware.Count +
-                         report.WeChatSensitiveFiles.Count + report.FullScanSensitiveFiles.Count;
+                         report.WeChatSensitiveFiles.Count + officeSensitiveTotal +
+                         report.FullScanSensitiveFiles.Count;
 
         sb.AppendLine("<div class=\"sg\">");
         sb.AppendLine(SC(totalItems.ToString(), "总违规/风险项", totalItems > 0 ? "danger" : "success"));
@@ -175,6 +188,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#F7FAFC}
             report.RemoteControlSoftware.Count > 0 ? "warning" : "success"));
         sb.AppendLine(SC(report.WeChatSensitiveFiles.Count.ToString(), "微信敏感文件",
             report.WeChatSensitiveFiles.Count > 0 ? "danger" : "success"));
+        sb.AppendLine(SC(officeSensitiveTotal.ToString(), "办公软件敏感文件",
+            officeSensitiveTotal > 0 ? "danger" : "success"));
         sb.AppendLine(SC(report.FullScanSensitiveFiles.Count.ToString(), "全盘敏感文件",
             report.FullScanSensitiveFiles.Count > 0 ? "danger" : "success"));
         sb.AppendLine("</div>");
@@ -353,7 +368,48 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#F7FAFC}
         AppendFileTable(sb, report.WeChatSensitiveFiles);
         sb.AppendLine("</div></div>");
 
-        // ---- SECTION 7: Full Scan Sensitive Files ----
+        // ---- SECTION 9: Office Software Sensitive Files ----
+        string offBadge = officeSensitiveTotal > 0 ? "danger" : "success";
+        string offTxt   = officeSensitiveTotal > 0 ? $"发现 {officeSensitiveTotal} 个" : "未发现";
+        sb.AppendLine($"""
+<div class="sec">
+  <div class="sh" onclick="toggle(this)">
+    <h2>🏢 办公软件敏感文件扫描 &nbsp;<span class="badge {offBadge}">{offTxt}</span></h2>
+    <span class="chv">▼</span>
+  </div>
+  <div class="sb">
+""");
+        if (report.OfficeSoftwareScans.Count == 0)
+        {
+            sb.AppendLine("<p class=\"em\">未执行办公软件扫描</p>");
+        }
+        else
+        {
+            foreach (var appScan in report.OfficeSoftwareScans)
+            {
+                string appBadge = appScan.SensitiveFiles.Count > 0 ? "danger" :
+                                  appScan.IsInstalled               ? "success" : "info";
+                string appStatus = !appScan.IsInstalled         ? "未安装" :
+                                   appScan.SensitiveFiles.Count > 0
+                                       ? $"发现 {appScan.SensitiveFiles.Count} 个敏感文件"
+                                       : "未发现敏感文件";
+
+                sb.AppendLine($"""
+  <h3 style="margin:12px 0 4px">{H(appScan.AppName)} &nbsp;<span class="badge {appBadge}" style="font-size:12px">{appStatus}</span></h3>
+""");
+                if (appScan.IsInstalled && !string.IsNullOrEmpty(appScan.DataPath))
+                    sb.AppendLine($"  <p style=\"font-size:12px;color:var(--muted)\">扫描路径：{H(appScan.DataPath)}</p>");
+
+                if (appScan.SensitiveFiles.Count > 0)
+                {
+                    AppendTypeBreakdown(sb, appScan.SensitiveFiles);
+                    AppendFileTable(sb, appScan.SensitiveFiles);
+                }
+            }
+        }
+        sb.AppendLine("</div></div>");
+
+        // ---- SECTION 10: Full Scan Sensitive Files ----
         string fsBadge = report.FullScanSensitiveFiles.Count > 0 ? "danger" : "success";
         string fsTxt   = report.FullScanSensitiveFiles.Count > 0 ? $"发现 {report.FullScanSensitiveFiles.Count} 个" : "未发现";
         sb.AppendLine($"""
