@@ -1,0 +1,15 @@
+# Build outputs
+EndpointComplianceChecker/bin/
+EndpointComplianceChecker/obj/
+
+# User-specific files
+*.user
+*.suo
+.vs/
+
+# Runtime config (may contain sensitive info)
+EndpointComplianceChecker/config/email_config.json
+
+# OS
+Thumbs.db
+.DS_Store

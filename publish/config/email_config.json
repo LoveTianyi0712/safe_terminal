@@ -1,0 +1,10 @@
+{
+  "smtp_server": "smtp.office365.com",
+  "port": 587,
+  "use_tls": true,
+  "username": "checker@company.com",
+  "password": "",
+  "from": "checker@company.com",
+  "to": ["admin@company.com", "sec@company.com"],
+  "subject": "终端合规报告 - {computer_name} - {date}"
+}
