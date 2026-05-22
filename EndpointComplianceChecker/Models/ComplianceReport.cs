@@ -3,7 +3,7 @@ namespace EndpointComplianceChecker.Models;
 public class ComplianceReport
 {
     public DateTime GeneratedAt { get; set; } = DateTime.Now;
-    public string ToolVersion { get; set; } = "1.0.0";
+    public string ToolVersion { get; set; } = "1.1.0";
     public bool IsPartial { get; set; }
     public BasicInfo BasicInfo { get; set; } = new();
     public string OsLicenseStatus { get; set; } = string.Empty;

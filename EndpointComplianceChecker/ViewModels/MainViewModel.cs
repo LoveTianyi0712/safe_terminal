@@ -124,7 +124,7 @@ public class MainViewModel : BaseViewModel
 
     private async Task RunScanAsync(CancellationToken ct)
     {
-        var report = new ComplianceReport { ToolVersion = "1.0.0" };
+        var report = new ComplianceReport { ToolVersion = "1.1.0" };
         var logProgress = new Progress<string>(msg =>
         {
             App.Current.Dispatcher.Invoke(() =>

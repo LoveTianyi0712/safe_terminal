@@ -6,8 +6,12 @@ namespace EndpointComplianceChecker.Services;
 
 public class ConfigService
 {
+    // Use the actual exe directory (not AppContext.BaseDirectory which points to temp
+    // extraction folder when PublishSingleFile + IncludeNativeLibrariesForSelfExtract is true).
     private static readonly string ConfigDir = Path.Combine(
-        AppContext.BaseDirectory, "config");
+        Path.GetDirectoryName(Environment.ProcessPath ?? AppContext.BaseDirectory)
+            ?? AppContext.BaseDirectory,
+        "config");
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
