@@ -154,6 +154,18 @@ public partial class SensitivePatternsWindow : Window
 
     private void BtnSave_Click(object sender, RoutedEventArgs e)
     {
+        // Auto-apply any pending edits from the current selection before saving
+        if (BtnApply.IsEnabled && PatternList.SelectedItem is SensitivePattern pendingSel)
+        {
+            if (!string.IsNullOrWhiteSpace(TxtType.Text) && ValidateRegex(TxtRegex.Text, out _))
+            {
+                pendingSel.Type         = TxtType.Text.Trim();
+                pendingSel.Regex        = TxtRegex.Text.Trim();
+                pendingSel.MinFileCount = int.TryParse(TxtThreshold.Text.Trim(), out var th) && th >= 0 ? th : 0;
+                _dirty = true;
+            }
+        }
+
         // Validate all patterns before saving
         var invalid = _patterns
             .Where(p => string.IsNullOrWhiteSpace(p.Type) || string.IsNullOrWhiteSpace(p.Regex))
@@ -185,7 +197,7 @@ public partial class SensitivePatternsWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"保存失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"保存失败：{ex.Message}\n\n请确认程序目录有写入权限。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -281,7 +293,7 @@ public partial class SensitivePatternsWindow : Window
     {
         new() { Type = "手机号",   Regex = @"(?<!\d)1[3-9]\d{9}(?!\d)",                                                         MinFileCount = 0 },
         new() { Type = "身份证号", Regex = @"\b[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b", MinFileCount = 0 },
-        new() { Type = "银行卡号", Regex = @"\b[3-9]\d{15,18}\b",                                                               MinFileCount = 0 },
+        new() { Type = "银行卡号", Regex = @"(?<!\d)(?:4\d{15}|5[1-5]\d{14}|62\d{14,17}|3[47]\d{13}|35\d{14})(?!\d)",        MinFileCount = 0 },
         new() { Type = "IPv4地址", Regex = @"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b",  MinFileCount = 0 },
         new() { Type = "住址",     Regex = @"[\u4e00-\u9fa5]{2,}(省|自治区)[\u4e00-\u9fa5]{2,}(市|州)[\u4e00-\u9fa5]{2,}(区|县|镇|乡)", MinFileCount = 0 },
     };

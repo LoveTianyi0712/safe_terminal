@@ -287,6 +287,14 @@
                             IsEnabled="{Binding CanSaveReport}"
                             MinWidth="100" Margin="0,0,8,0"/>
 
+                    <Button Content="📝  查看结果"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Command="{Binding ReviewResultsCommand}"
+                            IsEnabled="{Binding CanReviewResults}"
+                            MinWidth="100" Margin="0,0,8,0"
+                            Background="#2E86AB"
+                            ToolTip="查看敏感文件列表，支持按类型过滤和批量移除"/>
+
                     <Button Content="📋  配置规则"
                             Style="{StaticResource SecondaryButtonStyle}"
                             MinWidth="100"

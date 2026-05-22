@@ -6,16 +6,16 @@ namespace EndpointComplianceChecker.Services;
 
 public class VirtualMachineService
 {
-    // Registry paths and display names for known VM products
-    private static readonly (string RegPath, string Name, string Type)[] VmRegistryChecks =
+    // (RegPath, Name, Type, IsBuiltIn)
+    private static readonly (string RegPath, string Name, string Type, bool IsBuiltIn)[] VmRegistryChecks =
     [
-        (@"SOFTWARE\VMware, Inc.\VMware Workstation",        "VMware Workstation",  "VMware"),
-        (@"SOFTWARE\VMware, Inc.\VMware Player",             "VMware Player",       "VMware"),
-        (@"SOFTWARE\Oracle\VirtualBox",                      "VirtualBox",          "VirtualBox"),
-        (@"SOFTWARE\Parallels\Desktop",                      "Parallels Desktop",   "Parallels"),
-        (@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization", "Hyper-V Host", "Hyper-V"),
-        (@"SOFTWARE\QEMU",                                   "QEMU",                "QEMU"),
-        (@"SOFTWARE\Bochs",                                  "Bochs",               "Bochs"),
+        (@"SOFTWARE\VMware, Inc.\VMware Workstation",        "VMware Workstation",  "VMware",    false),
+        (@"SOFTWARE\VMware, Inc.\VMware Player",             "VMware Player",       "VMware",    false),
+        (@"SOFTWARE\Oracle\VirtualBox",                      "VirtualBox",          "VirtualBox",false),
+        (@"SOFTWARE\Parallels\Desktop",                      "Parallels Desktop",   "Parallels", false),
+        (@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization", "Hyper-V Host", "Hyper-V", true),
+        (@"SOFTWARE\QEMU",                                   "QEMU",                "QEMU",      false),
+        (@"SOFTWARE\Bochs",                                  "Bochs",               "Bochs",     false),
     ];
 
     // Program Files sub-paths to probe
@@ -28,14 +28,15 @@ public class VirtualMachineService
         (@"Parallels\Desktop",           "Parallels Desktop",   "Parallels"),
     ];
 
-    // Windows service names indicating VM host is installed/running
-    private static readonly (string ServiceName, string Name, string Type)[] VmServiceChecks =
+    // (ServiceName, Name, Type, IsBuiltIn)
+    private static readonly (string ServiceName, string Name, string Type, bool IsBuiltIn)[] VmServiceChecks =
     [
-        ("vmware-hostd",  "VMware Host Daemon",  "VMware"),
-        ("VMAuthdService","VMware Authorization", "VMware"),
-        ("vboxsvc",       "VirtualBox COM Service","VirtualBox"),
-        ("VBoxDrv",       "VirtualBox Driver",   "VirtualBox"),
-        ("vmms",          "Hyper-V Manager",     "Hyper-V"),
+        ("vmware-hostd",  "VMware Host Daemon",    "VMware",    false),
+        ("VMAuthdService","VMware Authorization",   "VMware",    false),
+        ("vboxsvc",       "VirtualBox COM Service", "VirtualBox",false),
+        ("VBoxDrv",       "VirtualBox Driver",      "VirtualBox",false),
+        ("vmms",          "Hyper-V 管理器",          "Hyper-V",   true),
+        ("HvHost",        "Hyper-V Host Service",   "Hyper-V",   true),
     ];
 
     public VirtualMachineResult Scan(IProgress<string>? progress = null)
@@ -47,7 +48,7 @@ public class VirtualMachineService
         // 1. Registry checks (HKLM 64-bit + 32-bit views)
         foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
         {
-            foreach (var (regPath, name, type) in VmRegistryChecks)
+            foreach (var (regPath, name, type, isBuiltIn) in VmRegistryChecks)
             {
                 try
                 {
@@ -59,11 +60,13 @@ public class VirtualMachineService
                     {
                         result.Found.Add(new VirtualMachineItem
                         {
-                            Name     = name,
-                            Type     = type,
-                            Evidence = $"注册表: {hive}\\{regPath}",
+                            Name      = name,
+                            Type      = type,
+                            Evidence  = $"注册表: {hive}\\{regPath}",
+                            IsBuiltIn = isBuiltIn,
                         });
-                        progress?.Report($"[FAIL] 检测到虚拟机: {name} (注册表)");
+                        var level = isBuiltIn ? "[WARN]" : "[FAIL]";
+                        progress?.Report($"{level} 检测到{(isBuiltIn ? "内置" : "第三方")}虚拟化: {name} (注册表)");
                     }
                 }
                 catch { }
@@ -100,7 +103,7 @@ public class VirtualMachineService
         }
 
         // 3. Windows service presence
-        foreach (var (svcName, name, type) in VmServiceChecks)
+        foreach (var (svcName, name, type, isBuiltIn) in VmServiceChecks)
         {
             try
             {
@@ -110,20 +113,30 @@ public class VirtualMachineService
                 {
                     result.Found.Add(new VirtualMachineItem
                     {
-                        Name     = name,
-                        Type     = type,
-                        Evidence = $"系统服务: {svcName}",
+                        Name      = name,
+                        Type      = type,
+                        Evidence  = $"系统服务: {svcName}",
+                        IsBuiltIn = isBuiltIn,
                     });
-                    progress?.Report($"[FAIL] 检测到虚拟机: {name} (服务 {svcName})");
+                    var level = isBuiltIn ? "[WARN]" : "[FAIL]";
+                    progress?.Report($"{level} 检测到{(isBuiltIn ? "内置" : "第三方")}虚拟化: {name} (服务 {svcName})");
                 }
             }
             catch { }
         }
 
+        int thirdParty = result.Found.Count(v => !v.IsBuiltIn);
+        int builtIn    = result.Found.Count(v => v.IsBuiltIn);
+
         if (result.Found.Count == 0)
             progress?.Report("[PASS] 未检测到虚拟机软件");
         else
-            progress?.Report($"[FAIL] 共检测到 {result.Found.Count} 项虚拟机相关软件");
+        {
+            if (thirdParty > 0)
+                progress?.Report($"[FAIL] 检测到第三方VM软件 {thirdParty} 项（违规）" + (builtIn > 0 ? $"，内置Hyper-V {builtIn} 项（警告）" : ""));
+            else
+                progress?.Report($"[WARN] 仅检测到Windows内置Hyper-V {builtIn} 项（警告，非违规）");
+        }
 
         return result;
     }

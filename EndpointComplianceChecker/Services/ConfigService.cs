@@ -78,8 +78,11 @@ public class ConfigService
 
     private static List<SensitivePattern> DefaultSensitivePatterns() => new()
     {
-        new() { Type = "手机号", Regex = @"(?<!\d)1[3-9]\d{9}(?!\d)" },
-        new() { Type = "身份证号", Regex = @"\b[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b" }
+        new() { Type = "手机号",   Regex = @"(?<!\d)1[3-9]\d{9}(?!\d)" },
+        new() { Type = "身份证号", Regex = @"\b[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b" },
+        new() { Type = "银行卡号", Regex = @"(?<!\d)(?:4\d{15}|5[1-5]\d{14}|62\d{14,17}|3[47]\d{13}|35\d{14})(?!\d)" },
+        new() { Type = "IPv4地址", Regex = @"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b" },
+        new() { Type = "住址",     Regex = @"[\u4e00-\u9fa5]{2,}(省|自治区)[\u4e00-\u9fa5]{2,}(市|州)[\u4e00-\u9fa5]{2,}(区|县|镇|乡)" },
     };
 
     private static ScanSettings DefaultScanSettings() => new()

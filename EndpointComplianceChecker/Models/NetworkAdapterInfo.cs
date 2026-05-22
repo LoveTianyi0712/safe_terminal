@@ -7,6 +7,7 @@ public class NetworkAdapterInfo
     public string Name        { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public bool IsWireless    { get; set; }
+    public bool IsVirtual     { get; set; }
     public string MacAddress  { get; set; } = string.Empty;
     public List<string> IpAddresses { get; set; } = new();
     public string? DefaultGateway   { get; set; }
@@ -35,13 +36,20 @@ public class NetworkAdaptersResult
 
 public class VirtualMachineItem
 {
-    public string Name    { get; set; } = string.Empty;
-    public string Type    { get; set; } = string.Empty;   // e.g. VMware / VirtualBox / Hyper-V
-    public string Evidence { get; set; } = string.Empty;  // Registry key / process name etc.
+    public string Name      { get; set; } = string.Empty;
+    public string Type      { get; set; } = string.Empty;
+    public string Evidence  { get; set; } = string.Empty;
+    /// <summary>True for Windows built-in Hyper-V (enabled by WSL2/Docker) — warning only, not violation.</summary>
+    public bool   IsBuiltIn { get; set; }
 }
 
 public class VirtualMachineResult
 {
     public List<VirtualMachineItem> Found { get; set; } = new();
-    public bool HasViolation => Found.Count > 0;
+
+    /// <summary>Third-party VM software detected (VMware / VirtualBox / Parallels etc.) — violation.</summary>
+    public bool HasViolation => Found.Any(v => !v.IsBuiltIn);
+
+    /// <summary>Windows built-in Hyper-V detected (may be used by WSL2/Docker) — warning only.</summary>
+    public bool HasWarning => !HasViolation && Found.Any(v => v.IsBuiltIn);
 }

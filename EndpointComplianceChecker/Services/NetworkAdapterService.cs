@@ -8,7 +8,22 @@ namespace EndpointComplianceChecker.Services;
 public class NetworkAdapterService
 {
     private const string TestHost    = "www.baidu.com";
-    private const int    PingTimeout = 3000;   // ms per ping attempt
+    private const int    PingTimeout = 3000;
+
+    // Adapter description keywords that indicate virtual/software adapters
+    private static readonly string[] VirtualAdapterKeywords =
+    [
+        "VMware", "VirtualBox", "Hyper-V", "vEthernet", "Virtual",
+        "TAP", "Pseudo", "Miniport", "6to4", "Teredo", "ISATAP",
+        "Bluetooth", "WAN Miniport", "Microsoft Kernel Debug",
+        "Cisco AnyConnect", "OpenVPN", "SoftEther", "Npcap",
+        "WireGuard", "Tunngle", "Hamachi", "Radmin VPN"
+    ];
+
+    private static bool IsVirtualAdapter(NetworkInterface iface) =>
+        VirtualAdapterKeywords.Any(kw =>
+            iface.Description.Contains(kw, StringComparison.OrdinalIgnoreCase) ||
+            iface.Name.Contains(kw, StringComparison.OrdinalIgnoreCase));
 
     public NetworkAdaptersResult Scan(IProgress<string>? progress = null)
     {
@@ -20,10 +35,12 @@ public class NetworkAdapterService
             var allIfaces = NetworkInterface.GetAllNetworkInterfaces();
             foreach (var iface in allIfaces)
             {
-                // Skip purely virtual/non-physical types
-                if (iface.NetworkInterfaceType == NetworkInterfaceType.Loopback)  continue;
-                if (iface.NetworkInterfaceType == NetworkInterfaceType.Tunnel)    continue;
+                // Skip loopback and tunnel types
+                if (iface.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                if (iface.NetworkInterfaceType == NetworkInterfaceType.Tunnel)   continue;
                 if (iface.Description.Contains("Loopback", StringComparison.OrdinalIgnoreCase)) continue;
+
+                bool isVirtual = IsVirtualAdapter(iface);
 
                 var info = new NetworkAdapterInfo
                 {
@@ -33,6 +50,7 @@ public class NetworkAdapterService
                                   || iface.Description.Contains("Wi-Fi",    StringComparison.OrdinalIgnoreCase)
                                   || iface.Description.Contains("Wireless", StringComparison.OrdinalIgnoreCase)
                                   || iface.Description.Contains("WLAN",     StringComparison.OrdinalIgnoreCase),
+                    IsVirtual   = isVirtual,
                     MacAddress  = string.Join(":", iface.GetPhysicalAddress().GetAddressBytes()
                                       .Select(b => b.ToString("X2"))),
                     Status      = iface.OperationalStatus,
@@ -49,7 +67,7 @@ public class NetworkAdapterService
 
                 result.Adapters.Add(info);
                 progress?.Report($"[INFO] 网卡: {iface.Name} | {iface.Description} | " +
-                                 $"{(info.IsWireless ? "无线" : "有线")} | {iface.OperationalStatus}");
+                                 $"{(info.IsVirtual ? "虚拟" : info.IsWireless ? "无线" : "有线")} | {iface.OperationalStatus}");
             }
 
             // Test internet reachability for each UP adapter that has a gateway
@@ -110,16 +128,20 @@ public class NetworkAdapterService
                 }
             }
 
-            // --- Violation / Warning logic ---
-            int activeCount = result.Adapters.Count(a => a.Status == OperationalStatus.Up);
-            int wiredCount  = result.Adapters.Count(a => a.Status == OperationalStatus.Up && !a.IsWireless);
-            int wirelessCount = result.Adapters.Count(a => a.Status == OperationalStatus.Up && a.IsWireless);
+            // --- Violation / Warning logic (only count physical adapters) ---
+            int activeCount   = result.Adapters.Count(a => a.Status == OperationalStatus.Up && !a.IsVirtual);
+            int wiredCount    = result.Adapters.Count(a => a.Status == OperationalStatus.Up && !a.IsVirtual && !a.IsWireless);
+            int wirelessCount = result.Adapters.Count(a => a.Status == OperationalStatus.Up && !a.IsVirtual && a.IsWireless);
+            int virtualCount  = result.Adapters.Count(a => a.Status == OperationalStatus.Up && a.IsVirtual);
+
+            if (virtualCount > 0)
+                progress?.Report($"[INFO] 已排除 {virtualCount} 个虚拟/软件网卡，不计入违规统计");
 
             if (activeCount > 2)
             {
                 result.HasViolation = true;
-                result.Summary = $"违规：活跃网卡数 {activeCount} 个（超过2个）";
-                progress?.Report($"[FAIL] 网卡数量违规：{activeCount} 个活跃网卡");
+                result.Summary = $"违规：物理活跃网卡数 {activeCount} 个（超过2个）";
+                progress?.Report($"[FAIL] 网卡数量违规：{activeCount} 个物理活跃网卡");
             }
             else if (wiredCount >= 1 && wirelessCount >= 1)
             {
@@ -129,8 +151,8 @@ public class NetworkAdapterService
             }
             else
             {
-                result.Summary = $"正常：活跃网卡 {activeCount} 个";
-                progress?.Report($"[PASS] 网卡检测通过：{activeCount} 个活跃网卡");
+                result.Summary = $"正常：物理活跃网卡 {activeCount} 个";
+                progress?.Report($"[PASS] 网卡检测通过：{activeCount} 个物理活跃网卡");
             }
         }
         catch (Exception ex)

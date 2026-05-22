@@ -40,7 +40,11 @@ public class MainViewModel : BaseViewModel
     public bool CanSaveReport
     {
         get => _canSaveReport;
-        private set => SetField(ref _canSaveReport, value);
+        private set
+        {
+            SetField(ref _canSaveReport, value);
+            OnPropertyChanged(nameof(CanReviewResults));
+        }
     }
 
     public double OverallProgress
@@ -55,15 +59,20 @@ public class MainViewModel : BaseViewModel
         private set => SetField(ref _statusText, value);
     }
 
-    public ICommand StartCommand { get; }
-    public ICommand StopCommand  { get; }
-    public ICommand SaveReportCommand { get; }
+    public ICommand StartCommand        { get; }
+    public ICommand StopCommand         { get; }
+    public ICommand SaveReportCommand   { get; }
+    public ICommand ReviewResultsCommand { get; }
+
+    public bool CanReviewResults => _canSaveReport && _lastReport != null &&
+        (_lastReport.WeChatSensitiveFiles.Count > 0 || _lastReport.FullScanSensitiveFiles.Count > 0);
 
     public MainViewModel()
     {
-        StartCommand      = new RelayCommand(StartScan,  () => CanStart);
-        StopCommand       = new RelayCommand(StopScan,   () => CanStop);
-        SaveReportCommand = new RelayCommand(SaveReport, () => CanSaveReport);
+        StartCommand         = new RelayCommand(StartScan,     () => CanStart);
+        StopCommand          = new RelayCommand(StopScan,      () => CanStop);
+        SaveReportCommand    = new RelayCommand(SaveReport,    () => CanSaveReport);
+        ReviewResultsCommand = new RelayCommand(ReviewResults, () => CanReviewResults);
 
         InitCheckItems();
     }
@@ -209,10 +218,19 @@ public class MainViewModel : BaseViewModel
                 SetItemRunning(6, "正在检测虚拟机软件...");
                 var svc = new VirtualMachineService();
                 report.VirtualMachines = svc.Scan(logProgress);
-                if (!report.VirtualMachines.HasViolation)
-                    SetItemPass(6, "未检测到虚拟机软件");
+                var vm = report.VirtualMachines;
+                if (vm.HasViolation)
+                {
+                    var thirdPartyNames = string.Join(", ", vm.Found.Where(v => !v.IsBuiltIn).Select(v => v.Name));
+                    SetItemFail(6, $"违规：发现第三方VM软件（{thirdPartyNames}）");
+                }
+                else if (vm.HasWarning)
+                {
+                    var builtInNames = string.Join(", ", vm.Found.Where(v => v.IsBuiltIn).Select(v => v.Name));
+                    SetItemWarning(6, $"警告：检测到Windows内置Hyper-V（{builtInNames}）");
+                }
                 else
-                    SetItemFail(6, $"违规：发现 {report.VirtualMachines.Found.Count} 项虚拟机软件（{string.Join(", ", report.VirtualMachines.Found.Select(v => v.Name))}）");
+                    SetItemPass(6, "未检测到虚拟机软件");
                 return Task.CompletedTask;
             });
             if (ct.IsCancellationRequested) { FinalizePartial(report); return; }
@@ -413,6 +431,16 @@ public class MainViewModel : BaseViewModel
             LogLines.Add($"[{ts}] {message}");
             if (LogLines.Count > 2000) LogLines.RemoveAt(0);
         });
+    }
+
+    private void ReviewResults()
+    {
+        if (_lastReport == null) return;
+        var win = new Views.SensitiveFileReviewWindow(_lastReport.WeChatSensitiveFiles,
+                                                      _lastReport.FullScanSensitiveFiles);
+        win.ShowDialog();
+        // CanReviewResults re-evaluated after dialog closes (list may have shrunk)
+        OnPropertyChanged(nameof(CanReviewResults));
     }
 
     private void SaveReport()
