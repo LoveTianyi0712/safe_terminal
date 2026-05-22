@@ -10,6 +10,10 @@ EndpointComplianceChecker/obj/
 # Runtime config (may contain sensitive info)
 EndpointComplianceChecker/config/email_config.json
 
+# Temp commit helper scripts
+do_commit*.bat
+do_final*.bat
+
 # OS
 Thumbs.db
 .DS_Store
