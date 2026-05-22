@@ -50,8 +50,8 @@
         <!-- Header -->
         <Border Grid.Row="0" Background="#1E3A5F" Padding="20,14">
             <StackPanel>
-                <TextBlock Text="📋 敏感文件结果查看 / 编辑" FontSize="15" FontWeight="Bold" Foreground="White"/>
-                <TextBlock Text="可按文件类型过滤，选中后批量移除（不影响实际文件，仅从本次报告中排除）"
+                <TextBlock Text="📋 敏感文件结果查看 / 删除" FontSize="15" FontWeight="Bold" Foreground="White"/>
+                <TextBlock Text="可按文件类型过滤，选中后批量删除磁盘上的实际文件（操作不可恢复，请谨慎）"
                            Foreground="#A8C6DA" FontSize="11" Margin="0,3,0,0"/>
             </StackPanel>
         </Border>
@@ -83,7 +83,7 @@
                            FontSize="11" Foreground="#718096"/>
 
                 <Button x:Name="BtnDeleteSelected" Grid.Column="5"
-                        Content="移除选中项" Margin="0,0,8,0"
+                        Content="🗑 删除选中文件" Margin="0,0,8,0"
                         Background="#E74C3C" Foreground="White" BorderThickness="0"
                         Style="{StaticResource ToolBtn}" IsEnabled="False"
                         Click="BtnDeleteSelected_Click"/>
@@ -117,10 +117,10 @@
         </ListView>
 
         <!-- Status bar -->
-        <Border Grid.Row="3" Padding="14,5" Background="#F7FAFC"
-                BorderBrush="#E2E8F0" BorderThickness="0,1,0,0">
-            <TextBlock x:Name="TxtStatus" FontSize="11" Foreground="#718096"
-                       Text="提示：移除操作仅从本次报告中排除，不会删除磁盘上的实际文件。"/>
+        <Border Grid.Row="3" Padding="14,5" Background="#FFF5F5"
+                BorderBrush="#FED7D7" BorderThickness="0,1,0,0">
+            <TextBlock x:Name="TxtStatus" FontSize="11" Foreground="#C53030"
+                       Text="⚠ 警告：删除操作将永久删除磁盘上的实际文件，且无法恢复，请谨慎操作！"/>
         </Border>
 
         <!-- Footer -->

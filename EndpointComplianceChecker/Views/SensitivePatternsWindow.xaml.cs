@@ -154,16 +154,16 @@ public partial class SensitivePatternsWindow : Window
 
     private void BtnSave_Click(object sender, RoutedEventArgs e)
     {
-        // Auto-apply any pending edits from the current selection before saving
-        if (BtnApply.IsEnabled && PatternList.SelectedItem is SensitivePattern pendingSel)
+        // Always sync the current edit-form values into the selected pattern before saving,
+        // regardless of whether the user clicked "应用修改" first.
+        if (PatternList.SelectedItem is SensitivePattern currentSel
+            && !string.IsNullOrWhiteSpace(TxtType.Text)
+            && ValidateRegex(TxtRegex.Text, out _))
         {
-            if (!string.IsNullOrWhiteSpace(TxtType.Text) && ValidateRegex(TxtRegex.Text, out _))
-            {
-                pendingSel.Type         = TxtType.Text.Trim();
-                pendingSel.Regex        = TxtRegex.Text.Trim();
-                pendingSel.MinFileCount = int.TryParse(TxtThreshold.Text.Trim(), out var th) && th >= 0 ? th : 0;
-                _dirty = true;
-            }
+            currentSel.Type         = TxtType.Text.Trim();
+            currentSel.Regex        = TxtRegex.Text.Trim();
+            currentSel.MinFileCount = int.TryParse(TxtThreshold.Text.Trim(), out var th) && th >= 0 ? th : 0;
+            _dirty = true;
         }
 
         // Validate all patterns before saving

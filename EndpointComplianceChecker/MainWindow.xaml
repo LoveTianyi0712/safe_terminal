@@ -293,7 +293,7 @@
                             IsEnabled="{Binding CanReviewResults}"
                             MinWidth="100" Margin="0,0,8,0"
                             Background="#2E86AB"
-                            ToolTip="查看敏感文件列表，支持按类型过滤和批量移除"/>
+                            ToolTip="查看敏感文件列表，支持按类型过滤，可批量永久删除磁盘上的实际文件"/>
 
                     <Button Content="📋  配置规则"
                             Style="{StaticResource SecondaryButtonStyle}"

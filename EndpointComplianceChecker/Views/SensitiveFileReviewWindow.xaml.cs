@@ -112,34 +112,74 @@ public partial class SensitiveFileReviewWindow : Window
 
     private void BtnDeleteSelected_Click(object sender, RoutedEventArgs e)
     {
-        var toRemove = FileList.SelectedItems.Cast<SensitiveFileReviewItem>().ToList();
-        if (toRemove.Count == 0) return;
+        var toDelete = FileList.SelectedItems.Cast<SensitiveFileReviewItem>().ToList();
+        if (toDelete.Count == 0) return;
+
+        // Build preview list (max 10 items shown)
+        var preview = string.Join("\n",
+            toDelete.Take(10).Select(i => $"  • {i.FilePath}"));
+        if (toDelete.Count > 10)
+            preview += $"\n  … 等共 {toDelete.Count} 个文件";
 
         var confirm = MessageBox.Show(
-            $"确认从本次报告中移除选中的 {toRemove.Count} 个文件记录？\n（不会删除磁盘上的实际文件）",
-            "移除确认", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            $"⚠ 即将永久删除磁盘上的以下 {toDelete.Count} 个文件：\n\n{preview}\n\n此操作不可恢复！确认删除？",
+            "确认永久删除", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (confirm != MessageBoxResult.Yes) return;
 
-        foreach (var item in toRemove)
+        int deleted = 0;
+        int failed  = 0;
+        var failMessages = new List<string>();
+
+        foreach (var item in toDelete)
         {
-            _wechatList.Remove(item.Original);
-            _fullList.Remove(item.Original);
-            _allItems.Remove(item);
+            try
+            {
+                if (File.Exists(item.FilePath))
+                {
+                    File.Delete(item.FilePath);
+                    deleted++;
+                }
+                else
+                {
+                    // File already gone — still remove from list
+                    deleted++;
+                }
+                _wechatList.Remove(item.Original);
+                _fullList.Remove(item.Original);
+                _allItems.Remove(item);
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                failMessages.Add($"{item.FileName}: {ex.Message}");
+            }
         }
 
-        // Refresh extension filter options (some may now be empty)
+        // Refresh extension filter options
         var currentExt = CmbExtension.SelectedItem as string;
         var exts = _allItems
             .Select(i => i.Extension)
             .Distinct()
-            .OrderBy(e => e)
+            .OrderBy(ext => ext)
             .Prepend("全部类型")
             .ToList();
         CmbExtension.ItemsSource = exts;
         CmbExtension.SelectedItem = exts.Contains(currentExt!) ? currentExt : "全部类型";
 
         ApplyFilter();
-        TxtStatus.Text = $"已移除 {toRemove.Count} 项，当前共 {_allItems.Count} 条记录（未保存报告前可继续修改）。";
+
+        if (failed > 0)
+        {
+            var failDetail = string.Join("\n", failMessages.Take(5));
+            TxtStatus.Text = $"已删除 {deleted} 个文件，{failed} 个失败（权限不足或被占用）。";
+            MessageBox.Show(
+                $"成功删除 {deleted} 个文件，以下 {failed} 个文件删除失败：\n\n{failDetail}",
+                "部分删除失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        else
+        {
+            TxtStatus.Text = $"✅ 已成功删除 {deleted} 个文件，当前还有 {_allItems.Count} 条记录。";
+        }
     }
 
     // ------------------------------------------------------------------ Helpers
