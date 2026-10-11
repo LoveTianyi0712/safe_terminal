@@ -99,13 +99,17 @@ public class MainViewModel : BaseViewModel
             CheckItems.Add(item);
     }
 
-    private void StartScan()
+private void StartScan()
     {
         _cts = new CancellationTokenSource();
         IsRunning = true;
         CanSaveReport = false;
         OverallProgress = 0;
         LogLines.Clear();
+
+        // 清理上次扫描结果，确保重新扫描时状态干净
+        _lastReport = null;
+        _lastHtmlPath = null;
 
         foreach (var item in CheckItems)
         {
@@ -127,7 +131,7 @@ public class MainViewModel : BaseViewModel
 
     private async Task RunScanAsync(CancellationToken ct)
     {
-        var report = new ComplianceReport { ToolVersion = "1.2.1" };
+        var report = new ComplianceReport { ToolVersion = "1.3.0" };
         var logProgress = new Progress<string>(msg =>
         {
             App.Current.Dispatcher.Invoke(() =>

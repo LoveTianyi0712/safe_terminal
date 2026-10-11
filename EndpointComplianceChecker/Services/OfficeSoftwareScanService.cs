@@ -12,10 +12,10 @@ public class OfficeSoftwareScanService
     private readonly List<SensitivePattern> _patterns;
     private readonly WeChatScanSettings     _settings;  // reuse size/exclude settings
 
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
+private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".txt", ".log", ".ini", ".cfg", ".csv", ".xml", ".json",
-        ".doc", ".docx", ".md", ".html", ".htm", ".bat", ".sh", ".conf"
+        ".doc", ".docx", ".xls", ".xlsx", ".md", ".html", ".htm", ".bat", ".sh", ".conf"
     };
 
     public OfficeSoftwareScanService(List<SensitivePattern> patterns, WeChatScanSettings settings)
@@ -331,10 +331,13 @@ public class OfficeSoftwareScanService
         return (types, counts);
     }
 
-    private static string ReadText(string path)
+private static string ReadText(string path)
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();
         if (ext is ".docx" or ".xlsx") return ReadOfficeXmlText(path);
+
+        // Legacy Excel format (.xls)
+        if (ext is ".xls") return ReadLegacyExcelText(path);
 
         const long MaxBytes = 1L * 1024 * 1024;
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -342,6 +345,115 @@ public class OfficeSoftwareScanService
         fs.Read(buf, 0, buf.Length);
         try { return Encoding.UTF8.GetString(buf); }
         catch { return Encoding.Default.GetString(buf); }
+    }
+
+    /// <summary>
+    /// Attempts to extract readable text from legacy Excel (.xls) files.
+    /// </summary>
+    private static string ReadLegacyExcelText(string path)
+    {
+        const long MaxBytes = 5L * 1024 * 1024;
+        try
+        {
+            if (new FileInfo(path).Length > MaxBytes) return string.Empty;
+
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            var buf = new byte[(int)Math.Min(fs.Length, MaxBytes)];
+            fs.Read(buf, 0, buf.Length);
+
+            var sb = new StringBuilder(2048);
+            ExtractPrintableStrings(buf, sb, 3);
+            return sb.ToString();
+        }
+        catch { return string.Empty; }
+    }
+
+    private static void ExtractPrintableStrings(byte[] data, StringBuilder sb, int step)
+    {
+        for (int i = 0; i < data.Length - 4; i += step)
+        {
+            if (IsAsciiString(data, i))
+            {
+                var str = ExtractAsciiString(data, i);
+                if (str.Length >= 4)
+                {
+                    sb.Append(str);
+                    sb.Append(' ');
+                    i += str.Length - 1;
+                }
+            }
+        }
+
+        for (int i = 0; i < data.Length - 6; i += step * 2)
+        {
+            if (IsUnicodeString(data, i))
+            {
+                var str = ExtractUnicodeString(data, i);
+                if (str.Length >= 3)
+                {
+                    sb.Append(str);
+                    sb.Append(' ');
+                    i += str.Length * 2 - 1;
+                }
+            }
+        }
+    }
+
+    private static bool IsAsciiString(byte[] data, int start)
+    {
+        int maxLen = Math.Min(255, data.Length - start - 1);
+        int count = 0;
+        for (int i = 1; i <= maxLen && i <= 50; i++)
+        {
+            byte b = data[start + i];
+            if (b >= 0x20 && b <= 0x7E) count++;
+            else if (b == 0) break;
+            else break;
+        }
+        return count >= 4;
+    }
+
+    private static string ExtractAsciiString(byte[] data, int start)
+    {
+        var sb = new StringBuilder();
+        int maxLen = Math.Min(255, data.Length - start - 1);
+        for (int i = 1; i <= maxLen; i++)
+        {
+            byte b = data[start + i];
+            if (b >= 0x20 && b <= 0x7E) sb.Append((char)b);
+            else if (b == 0) break;
+            else break;
+        }
+        return sb.ToString();
+    }
+
+    private static bool IsUnicodeString(byte[] data, int start)
+    {
+        if (start + 3 > data.Length) return false;
+        int maxLen = Math.Min(510, (data.Length - start - 1) / 2);
+        int count = 0;
+        for (int i = 2; i <= maxLen && start + i * 2 + 1 < data.Length; i += 2)
+        {
+            char c = (char)(data[start + i] | (data[start + i + 1] << 8));
+            if (c >= 0x20 && c <= 0x7E) count++;
+            else if (c == 0) break;
+            else break;
+        }
+        return count >= 3;
+    }
+
+    private static string ExtractUnicodeString(byte[] data, int start)
+    {
+        var sb = new StringBuilder();
+        int maxLen = Math.Min(510, (data.Length - start - 1) / 2);
+        for (int i = 2; i <= maxLen && start + i * 2 + 1 < data.Length; i += 2)
+        {
+            char c = (char)(data[start + i] | (data[start + i + 1] << 8));
+            if (c >= 0x20 && c <= 0x7E) sb.Append(c);
+            else if (c == 0) break;
+            else break;
+        }
+        return sb.ToString();
     }
 
     private static string ReadOfficeXmlText(string path)
